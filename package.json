@@ -1,0 +1,98 @@
+{
+  "devDependencies": {
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3"
+  },
+  "name": "amazon-cash-planner",
+  "productName": "Amazon Cash Planner",
+  "version": "4.8.0",
+  "description": "Plans Amazon FBA cash flow from reports downloaded on this computer.",
+  "private": true,
+  "main": "desktop/main.js",
+  "scripts": {
+    "desktop": "electron .",
+    "desktop:pack": "electron-builder --dir",
+    "desktop:build": "electron-builder --win nsis",
+    "test": "node test/run.js",
+    "desktop:release": "node desktop/make-release.js"
+  },
+  "build": {
+    "appId": "com.local.amazon-cash-planner",
+    "productName": "Amazon Cash Planner",
+    "directories": {
+      "output": "dist-desktop",
+      "buildResources": "desktop/build"
+    },
+    "files": [
+      "desktop/**/*",
+      "lib/**/*",
+      "app.html",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "worker",
+        "to": "app/worker",
+        "filter": [
+          "**/*",
+          "!venv/**",
+          "!profile/**",
+          "!downloads/**",
+          "!logs/**",
+          "!__pycache__/**",
+          "!jobs.json",
+          "!reports.db*",
+          "!settings.json",
+          "!dataset.json",
+          "!config.json",
+          "!diagnostic-report.txt",
+          "!test_*.py",
+          "!testdata/**",
+          "!.gitignore"
+        ]
+      },
+      {
+        "from": "lib",
+        "to": "app/lib"
+      },
+      {
+        "from": "app.html",
+        "to": "app/app.html"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "desktop/build/icon.ico",
+      "signAndEditExecutable": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "installerIcon": "desktop/build/icon.ico",
+      "uninstallerIcon": "desktop/build/icon.ico",
+      "shortcutName": "Amazon Cash Planner",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Cocokylez",
+        "repo": "amazon-cash-planner",
+        "releaseType": "release"
+      }
+    ]
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
+}

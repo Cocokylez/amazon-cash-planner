@@ -1,0 +1,169 @@
+================================================================
+  AMAZON CASH PLANNER
+  Start here
+================================================================
+
+WHAT THIS IS
+  A planning app for your Amazon payouts and cash, plus an
+  optional helper that downloads your Seller Central reports
+  for you.
+
+  Everything runs on your own computer. Nothing is uploaded.
+  You are never asked for your Amazon password.
+
+
+----------------------------------------------------------------
+  STEP 1  -  Extract this package
+----------------------------------------------------------------
+
+  You have downloaded a ZIP file. Windows will not run anything
+  from inside a ZIP, so extract it first:
+
+    1. Right-click the ZIP file.
+    2. Choose "Extract All...".
+    3. Choose where to put it. Your Documents folder is fine.
+    4. Click Extract.
+
+  You now have a folder called amazon-cash-planner.
+  THAT folder is what these instructions mean by "the app folder".
+
+
+----------------------------------------------------------------
+  STEP 2  -  Run setup (once)
+----------------------------------------------------------------
+
+    1. Open the app folder.
+    2. Open the "worker" folder inside it.
+    3. Double-click:   SETUP.cmd
+
+  A black window opens and talks you through it.
+
+  If it says Python is missing, it opens the download page for
+  you. Install Python (tick "Add python.exe to PATH" on the
+  first screen), then double-click SETUP.cmd again.
+
+  Setup takes a few minutes, mostly downloading a browser for
+  the helper to drive.
+
+  If Windows shows a blue "Windows protected your PC" box:
+  click "More info", then "Run anyway". That appears because
+  the file is new, not because anything is wrong.
+
+
+----------------------------------------------------------------
+  STEP 3  -  Open the app
+----------------------------------------------------------------
+
+  Setup puts a shortcut on your Desktop:
+
+        Amazon Cash Planner
+
+  Double-click it. It starts the helper and opens the app in
+  your browser at:
+
+        http://127.0.0.1:8765
+
+  USE THAT ADDRESS FROM NOW ON. Bookmark it.
+  It is the only version that can download from Amazon.
+
+
+----------------------------------------------------------------
+  STEP 4  -  Set up your reports (once each)
+----------------------------------------------------------------
+
+  In the app:  Data & Assumptions  ->  "Set up" beside a report.
+
+  A browser window opens on Amazon. Sign in if it asks. Then
+  click the controls the app names - the From box, the To box,
+  the Download button. About a minute per report.
+
+  This step exists because Amazon's report pages differ between
+  accounts and change over time. Rather than guess and risk
+  downloading the wrong report, the app watches you do it once.
+
+
+----------------------------------------------------------------
+  STEP 5  -  Daily use
+----------------------------------------------------------------
+
+  Open your bookmark.
+  Press "Get today's Amazon data".
+
+  That is the whole daily routine. No terminal, ever again.
+
+
+================================================================
+  TWO ADDRESSES - WHICH ONE TO USE
+================================================================
+
+  http://127.0.0.1:8765            <-- USE THIS ONE
+      The local app, served by the helper.
+      Everything works, including Amazon downloads.
+
+  https://claude.ai/artifact/...
+      The same app, hosted. Every tab, every calculation and
+      manual CSV import work here, and your data syncs to your
+      Claude account across devices.
+      It CANNOT download from Amazon: browsers block any web
+      page from reaching a program on your computer. That is a
+      browser security rule, not a setting.
+
+
+================================================================
+  MOVING DATA BETWEEN THE TWO
+================================================================
+
+  Browsers keep each website's data separate. The local app and
+  the hosted app are different addresses, so each has its own
+  copy. Imports made in one do not appear in the other.
+
+  To move them:
+
+    In the app that HAS your data:
+      Data & Assumptions -> "Export a backup"  (saves a .json)
+
+    In the app you want it IN:
+      Data & Assumptions -> "Restore from backup" -> pick it
+
+  The backup carries your imported forecast reports, balances,
+  costs, plans and settings.
+
+  It does NOT carry raw transaction rows - those are large.
+  If you had imported a Payments transaction CSV, import that
+  file again afterwards. It takes seconds and nothing is lost.
+
+
+================================================================
+  IF SOMETHING GOES WRONG
+================================================================
+
+  App says "Not connected"
+      The helper is not running. Double-click the Desktop
+      shortcut. Or open worker\start-helper.cmd.
+
+  "The browser could not be opened"
+      Report setup needs a visible browser window, so it only
+      works while you are signed in at this computer's own
+      screen - not over a disconnected Remote Desktop session.
+
+  "Not set up yet"
+      Do Step 4 for that report.
+
+  Button says "Could not finish"
+      It never says "Updated" unless a file really was imported.
+      The message underneath names what stopped it.
+
+  More detail:  worker\INSTALL.txt
+
+
+================================================================
+  TURNING IT OFF
+================================================================
+
+  Stop the helper starting at login:
+      Press Win+R, type  shell:startup  , press Enter.
+      Delete  amazon-data-helper.cmd
+
+  Remove it completely:
+      Delete the whole app folder, and the Desktop shortcut.
+      Nothing is installed anywhere else.

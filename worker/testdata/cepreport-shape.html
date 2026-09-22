@@ -1,0 +1,193 @@
+<!doctype html><html><body>
+<!--
+  A stand-in for sellercentral.amazon.com/cepreport.
+
+  Not a copy of Amazon's page and holds no Amazon data. It reproduces the
+  things that actually broke the driver, every one of them taken from a real
+  failure report rather than imagined:
+
+    * controls are web components whose real markup is in a shadow root;
+    * a component carries its name in a `label` ATTRIBUTE, not as text beside
+      it - so searching the page for the words "Marketplace" finds nothing;
+    * the country tick boxes ALREADY EXIST in the DOM before the list is
+      opened, merely hidden, so "tick whatever appeared" ticks nothing;
+    * an unrelated feedback widget puts four more tick boxes on the page that
+      must never be touched;
+    * the section headings are styled divs, not <h> tags;
+    * Generate Report stays disabled until all six options are ticked.
+-->
+<div class="nav"><button>Products</button><button>Orders</button></div>
+
+<div class="hd">Step 1: Select Report Aggregation Levels</div>
+<kat-dropdown id="mp" label="Marketplace"></kat-dropdown>
+<kat-dropdown id="agg" label="Data aggregation level"></kat-dropdown>
+<kat-dropdown id="dr" label="Date Range"></kat-dropdown>
+
+<div class="hd">Step 2: Set Report Configurations</div>
+<div class="hd2">Simplified Report Configuration Options</div>
+<div id="opts">
+  <kat-checkbox label="Fulfillment base rate and surcharges"></kat-checkbox>
+  <kat-checkbox label="Sales Data"></kat-checkbox>
+  <kat-checkbox label="Storage Fee base rate and surcharges"></kat-checkbox>
+  <kat-checkbox label="Return and refund fees"></kat-checkbox>
+  <kat-checkbox label="Referral and closing fees"></kat-checkbox>
+  <kat-checkbox label="Advertising Spend Data"></kat-checkbox>
+</div>
+
+<div class="hd2">Add Notes</div>
+<textarea id="notes" placeholder="Add custom notes to this report, tailoring insights to your needs (Max 50 characters)." maxlength="50"></textarea>
+
+<kat-button id="gen" label="Generate Report" disabled></kat-button>
+
+<div class="hd2">Generated Reports</div>
+<table><tbody id="rows"></tbody></table>
+
+<!-- The decoys. A feedback panel, nothing to do with the report. -->
+<div id="feedback">
+  <kat-checkbox label="Can't find page"></kat-checkbox>
+  <kat-checkbox label="Not used to it"></kat-checkbox>
+  <kat-checkbox label="Technical issues"></kat-checkbox>
+  <kat-checkbox label="Other"></kat-checkbox>
+</div>
+
+<script>
+class KatCheckbox extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<label style="display:block;width:220px;height:20px">'
+      + '<input type="checkbox"> ' + this.getAttribute('label') + '</label>';
+    r.querySelector('input').addEventListener('change', () => {
+      this.setAttribute('aria-checked', r.querySelector('input').checked);
+      document.dispatchEvent(new Event('katchange'));
+    });
+  }
+}
+customElements.define('kat-checkbox', KatCheckbox);
+
+/* A tick box whose shadow root is CLOSED: nothing outside can see or click the
+   input within it, and it carries no label or checked attribute. Its state
+   lives only in a property. This is the shape that defeated the driver on the
+   real page, so it is reproduced here rather than imagined. */
+class KatClosedCheckbox extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'closed' });
+    r.innerHTML = '<span style="display:block;width:140px;height:20px">'
+      + (this.getAttribute('label') || 'box') + '</span>';
+    this._on = false;
+    Object.defineProperty(this, 'checked', {
+      get: () => this._on,
+      set: v => { this._on = !!v; document.dispatchEvent(new Event('katchange')); },
+      configurable: true,
+    });
+    this.addEventListener('click', () => { this.checked = !this._on; });
+  }
+}
+customElements.define('kat-closed-checkbox', KatClosedCheckbox);
+
+class KatDropdown extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    const opts = this.id === 'mp'
+      /* The countries use the CLOSED variant on purpose. On the real page
+         nothing could reach inside these, and reading their state from
+         attributes alone reported all four as "would not tick". */
+      /* Named, because a choice you cannot read is a choice you cannot make.
+         Still CLOSED-shadow: that part was real and is what made reading
+         their state from attributes fail. */
+      ? ['Brazil', 'Mexico', 'United States', 'Canada']
+          .map(c => '<kat-closed-checkbox label="' + c + '"></kat-closed-checkbox>').join('')
+      : this.id === 'dr'
+        /* A NATIVE <select>. Its <option>s are drawn by the operating system,
+           not the page, so they cannot be clicked - the value has to be set.
+           Trying to click them matched navigation links elsewhere on the page
+           and reported "Finance" as an available date range. */
+        ? null
+        : '<div role="option" style="width:140px;height:20px">MSKU</div>';
+
+    if (this.id === 'dr') {
+      r.innerHTML = '<select style="width:180px;height:24px">'
+        + ['Next 7 days', 'Next 30 days', 'Next 120 days', 'Custom date range']
+            .map(o => '<option>' + o + '</option>').join('')
+        + '</select>';
+      r.querySelector('select').value = 'Next 30 days';
+      return;
+    }
+    /* The panel and everything in it EXISTS from the start; opening only makes
+       it visible. This is what defeated "tick whatever is new". */
+    r.innerHTML = '<button style="width:180px;height:24px">'
+      + (this.id === 'dr' ? 'Next 30 days' : this.getAttribute('label'))
+      + '</button><div class="panel" style="display:none">' + opts + '</div>';
+    const panel = r.querySelector('.panel');
+    r.querySelector('button').addEventListener('click', () => {
+      panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    });
+    panel.addEventListener('click', e => {
+      const o = e.target.closest('[role=option]');
+      if (!o) return;
+      r.querySelector('button').textContent = o.textContent;
+      panel.style.display = 'none';
+    });
+  }
+}
+customElements.define('kat-dropdown', KatDropdown);
+
+class KatButton extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<button style="width:150px;height:28px">'
+      + this.getAttribute('label') + '</button>';
+    r.querySelector('button').addEventListener('click', () => {
+      if (this.hasAttribute('disabled')) return;
+      const note = document.getElementById('notes').value || '(none)';
+      document.getElementById('rows').innerHTML =
+        '<tr><td>SKU Economics</td><td>' + note + '</td><td>Pending</td></tr>';
+      /* Built a moment later, the way a real queue behaves. */
+      setTimeout(() => {
+        /* Kept across a reload, the way a real queue keeps a finished report.
+           The driver reloads the page while it waits, and a list that
+           forgot itself on reload would never be seen to finish. */
+        sessionStorage.setItem('acp-row', note);
+        renderRow(note);
+      }, 1500);
+    });
+  }
+}
+customElements.define('kat-button', KatButton);
+
+/* A CSV with the shape of the real export, so the size and sanity checks in
+   the driver are actually exercised rather than tripped by a stub. The
+   figures are invented and mean nothing. */
+const CSV = ['MSKU,Marketplace,Units Sold,Net Sales,FBA Fulfilment Fee,'
+  + 'Referral Fee,Storage Fee,Advertising Spend,Returns',
+  'DEMO-001,United States,120,2400.00,-360.00,-360.00,-18.00,-140.00,-42.00',
+  'DEMO-002,United States,45,1125.00,-180.00,-168.75,-9.00,-60.00,-25.00',
+  'DEMO-003,Canada,18,410.00,-72.00,-61.50,-4.00,-20.00,0.00'].join(String.fromCharCode(10));
+
+function renderRow(note) {
+  document.getElementById('rows').innerHTML =
+    '<tr><td>SKU Economics</td><td>' + note
+    + '</td><td>Ready</td><td><a href="data:text/csv;charset=utf-8,'
+    + encodeURIComponent(CSV) + '" download="report.csv">Download</a>'
+    + '</td></tr>';
+}
+const kept = sessionStorage.getItem('acp-row');
+if (kept) renderRow(kept);
+
+/* Generate goes live only when all six report options are ticked - the real
+   page's own confirmation that the form is valid. */
+document.addEventListener('katchange', () => {
+  const boxes = [...document.querySelectorAll('#opts kat-checkbox')];
+  const all = boxes.every(b => b.getAttribute('aria-checked') === 'true');
+  /* The countries live inside the dropdown's shadow root, so a plain
+     querySelectorAll cannot see them - the same trap the driver fell into. */
+  const found = [];
+  (function walk(n) {
+    for (const e of n.querySelectorAll('*')) {
+      if (e.tagName === 'KAT-CLOSED-CHECKBOX') found.push(e);
+      if (e.shadowRoot) walk(e.shadowRoot);
+    }
+  })(document);
+  const mp = found.some(b => b.checked === true);
+  document.getElementById('gen').toggleAttribute('disabled', !(all && mp));
+});
+</script></body></html>

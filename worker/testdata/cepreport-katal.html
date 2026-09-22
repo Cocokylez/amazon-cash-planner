@@ -1,0 +1,167 @@
+<!doctype html><html><body>
+<!--
+  A stand-in for cepreport, built from the failure reports the real page gave.
+
+    <kat-dropdown data-testid,class,label,options,value,mobile-emulated-modal,
+                  size,expand-direction>  (shadow: open)
+
+  Two things this reproduces, both learned the hard way:
+
+  1. The choices are NOT in the markup. They live in an `options` property, so
+     they can be read but not found by searching the page.
+
+  2. Writing `value` is not choosing. The component will happily display the
+     value it is given, but the page's own validation only counts a real
+     click - so Generate Report stays greyed out while the form LOOKS filled
+     in. That is exactly what happened: six boxes ticked, a tag written, and
+     a dead Generate button.
+
+  So here, setting `value` from script updates the display and nothing else.
+  Only a genuine click marks the field as chosen, and Generate needs a
+  marketplace AND a date range AND all six options.
+-->
+<div class="hd">Step 1: Select Report Aggregation Levels</div>
+<kat-dropdown id="mp" label="Marketplace"></kat-dropdown>
+<kat-dropdown id="agg" label="Data aggregation level"></kat-dropdown>
+<kat-dropdown id="dr" label="Date Range"></kat-dropdown>
+
+<div class="hd">Step 2: Set Report Configurations</div>
+<div class="hd2">Simplified Report Configuration Options</div>
+<div id="opts">
+  <kat-checkbox label="Fulfillment base rate and surcharges"></kat-checkbox>
+  <kat-checkbox label="Sales Data"></kat-checkbox>
+  <kat-checkbox label="Storage Fee base rate and surcharges"></kat-checkbox>
+  <kat-checkbox label="Return and refund fees"></kat-checkbox>
+  <kat-checkbox label="Referral and closing fees"></kat-checkbox>
+  <kat-checkbox label="Advertising Spend Data"></kat-checkbox>
+</div>
+
+<div class="hd2">Add Notes</div>
+<textarea id="notes" placeholder="Add custom notes to this report, tailoring insights to your needs (Max 50 characters)." maxlength="50"></textarea>
+
+<kat-button id="gen" label="Generate Report" disabled></kat-button>
+
+<div class="hd2">Generated Reports</div>
+<table><tbody id="rows"></tbody></table>
+
+<!-- Navigation, which an over-eager text search once mistook for date ranges. -->
+<div id="nav">
+  <span>Finance</span><span>Profit analytics</span><span>Selling economics</span>
+</div>
+
+<script>
+/* The page's own record of what a PERSON has chosen. Script cannot write to
+   it; only a click does. This is the validation that kept saying no. */
+const picked = { mp: null, dr: null };
+
+class KatCheckbox extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<label style="display:block;width:220px;height:20px">'
+      + '<input type="checkbox"> ' + this.getAttribute('label') + '</label>';
+    r.querySelector('input').addEventListener('change', () => {
+      this.setAttribute('aria-checked', r.querySelector('input').checked);
+      revalidate();
+    });
+  }
+}
+customElements.define('kat-checkbox', KatCheckbox);
+
+class KatDropdown extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    this._value = this.id === 'agg' ? 'MSKU' : '';
+    this._options = this.id === 'mp'
+      ? [{ name: 'Brazil', value: 'BR' }, { name: 'Mexico', value: 'MX' },
+         { name: 'United States', value: 'US' }, { name: 'Canada', value: 'CA' }]
+      : this.id === 'dr'
+        ? [{ name: 'Next 7 days', value: 'NEXT_7' },
+           { name: 'Next 30 days', value: 'NEXT_30' },
+           { name: 'Next 120 days', value: 'NEXT_120' },
+           { name: 'Custom date range', value: 'CUSTOM' }]
+        : [{ name: 'MSKU', value: 'MSKU' }];
+
+    Object.defineProperty(this, 'options', {
+      get: () => this._options, configurable: true,
+    });
+    Object.defineProperty(this, 'value', {
+      get: () => this._value,
+      /* Displays it. Does NOT count as a choice. */
+      set: v => { this._value = v; this.render(); },
+      configurable: true,
+    });
+    this.setAttribute('options', JSON.stringify(this._options));
+    this.open = false;
+    this.render();
+  }
+
+  render() {
+    const r = this.shadowRoot;
+    if (!r) return;
+    const shown = (this._options.find(o => o.value === this._value) || {}).name;
+    r.innerHTML = '<div class="face" style="width:200px;height:24px;'
+      + 'border:1px solid #888">' + (shown || this.getAttribute('label')) + '</div>'
+      + (this.open
+        ? '<div class="panel" style="border:1px solid #ccc">'
+          + this._options.map(o => '<div class="opt" data-v="' + o.value
+            + '" style="width:200px;height:22px">' + o.name + '</div>').join('')
+          + '</div>'
+        : '');
+    this.setAttribute('value', String(this._value));
+
+    r.querySelector('.face').onclick = () => { this.open = !this.open; this.render(); };
+    for (const el of r.querySelectorAll('.opt')) {
+      el.onclick = () => {
+        this._value = el.getAttribute('data-v');
+        picked[this.id] = this._value;        /* only a real click lands here */
+        this.open = false;
+        this.render();
+        revalidate();
+      };
+    }
+  }
+}
+customElements.define('kat-dropdown', KatDropdown);
+
+class KatButton extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<button style="width:150px;height:28px">'
+      + this.getAttribute('label') + '</button>';
+    r.querySelector('button').addEventListener('click', () => {
+      if (this.hasAttribute('disabled')) return;
+      const note = document.getElementById('notes').value || '(none)';
+      document.getElementById('rows').innerHTML =
+        '<tr><td>SKU Economics</td><td>' + note + '</td><td>Pending</td></tr>';
+      setTimeout(() => {
+        sessionStorage.setItem('acp-katal-row', note);
+        renderRow(note);
+      }, 1200);
+    });
+  }
+}
+customElements.define('kat-button', KatButton);
+
+const CSV = ['MSKU,Marketplace,Units Sold,Net Sales,FBA Fulfilment Fee,'
+  + 'Referral Fee,Storage Fee,Advertising Spend,Returns',
+  'DEMO-001,United States,120,2400.00,-360.00,-360.00,-18.00,-140.00,-42.00',
+  'DEMO-002,United States,45,1125.00,-180.00,-168.75,-9.00,-60.00,-25.00',
+  'DEMO-003,United States,18,410.00,-72.00,-61.50,-4.00,-20.00,0.00']
+  .join(String.fromCharCode(10));
+
+function renderRow(note) {
+  document.getElementById('rows').innerHTML =
+    '<tr><td>SKU Economics</td><td>' + note
+    + '</td><td>Ready</td><td><a href="data:text/csv;charset=utf-8,'
+    + encodeURIComponent(CSV) + '" download="report.csv">Download</a></td></tr>';
+}
+const kept = sessionStorage.getItem('acp-katal-row');
+if (kept) renderRow(kept);
+
+function revalidate() {
+  const boxes = [...document.querySelectorAll('#opts kat-checkbox')];
+  const allTicked = boxes.every(b => b.getAttribute('aria-checked') === 'true');
+  document.getElementById('gen')
+    .toggleAttribute('disabled', !(allTicked && picked.mp && picked.dr));
+}
+</script></body></html>

@@ -1,0 +1,93 @@
+Amazon data helper — setup
+
+You do this once. It takes a few minutes, mostly downloading a browser.
+
+WHAT YOU NEED
+  Python 3.10 or newer.  Check with:   python --version
+  If you don't have it: https://www.python.org/downloads/
+  (On Windows, tick "Add Python to PATH" in the installer.)
+
+INSTALL
+  1. Open a terminal in this folder's parent (the app folder).
+  2. Run:
+         python worker/install.py
+  3. Wait. It creates worker/venv, installs Playwright, downloads Chromium,
+     and registers the helper to start when you log in.
+  4. It prints a link ending in ?token=... — open that. Bookmark it.
+
+FIRST RUN
+  In the app: Data & assumptions -> "Set up a report".
+  A browser opens on Amazon. Sign in if asked, then click the controls the
+  app names — the From box, the To box, Download. Once per report.
+
+  This is needed because Amazon's report pages differ by account and change
+  over time. Nothing is guessed: a wrong selector would download the wrong
+  report and import it as if it were right.
+
+DAILY USE
+  Open your bookmark, press "Get today's Amazon data". That's it.
+  No terminal, no setup.
+
+IF THE HELPER ISN'T RUNNING
+  The app will say so and show a Start button's instructions.
+  Double-click:  worker/start-helper.cmd   (Windows)
+                 worker/start-helper.sh    (Mac/Linux)
+
+REMOVING IT
+  Windows:  delete the .cmd in your Startup folder
+            (Win+R, type  shell:startup )
+  macOS:    launchctl unload ~/Library/LaunchAgents/com.local.amazon-data-helper.plist
+  Linux:    systemctl --user disable --now amazon-data-helper.service
+  Then delete the worker/venv folder.
+
+PRIVACY
+  Everything runs on your computer. Your Amazon password is never typed by
+  this program or entered in the web app — you sign in yourself in the
+  browser window it opens. The session is stored in worker/profile/ and
+  never leaves your machine. The helper listens on 127.0.0.1 only, so
+  nothing on your network can reach it.
+
+TROUBLESHOOTING
+
+"The browser could not be opened"
+  Report setup and downloads need a VISIBLE browser window. That only works
+  while you are signed in at the computer's own desktop. It will not work
+  over a disconnected Remote Desktop session, or from a Windows service.
+  If the helper started automatically at login and you hit this, start it
+  yourself with start-helper and try again.
+
+"Not set up yet"
+  Open Data & assumptions in the app and press "Set up" for that report.
+  Once per report; it takes about a minute.
+
+The button says "Could not finish"
+  It never says "Updated" unless a file was actually imported. Read the
+  message under it — it names the specific thing that stopped.
+
+================================================================
+  WHEN IT WILL NOT START
+================================================================
+
+Double-click DIAGNOSE in the worker folder. It writes
+diagnostic-report.txt beside it. That file contains no password,
+no Amazon cookies, no helper token and no financial data - open
+it and read it yourself before sending it anywhere.
+
+The three answers it usually gives:
+
+  "nothing is listening" + "helper procs: none running"
+      The helper is not running. Double-click open-app.cmd and
+      read the window that appears - it now stays open on an
+      error instead of vanishing.
+
+  "SOMETHING ELSE is listening"
+      Another program owns port 8765. Nothing of yours has been
+      stopped. Open config.json in the worker folder, change
+      "port" to 8766, save, then start again.
+
+  "venv python: MISSING" or "chromium: not found"
+      Setup did not finish. Run SETUP again and watch for the
+      error it reports.
+
+The helper also writes logs\helper.log every time it starts.
+Secrets are stripped from it as it is written.

@@ -1,0 +1,59 @@
+# ───────────────────────────────────────────────────────────────────────────
+#  NEVER COMMITTED — this is someone's Amazon account and financial records
+# ───────────────────────────────────────────────────────────────────────────
+#
+#  Everything in this block exists only on the machine that made it. A single
+#  `git add .` without these lines would put a signed-in Amazon session on the
+#  internet, and a leaked session cannot be un-leaked by deleting the commit.
+
+# The browser profile: cookies, "Login Data", the live Seller Central session.
+worker/profile/
+worker/*/profile/
+
+# This installation's worker token.
+worker/config.json
+
+# Downloaded reports, the database built from them, and job history.
+worker/downloads/
+worker/reports.db
+worker/reports.db-wal
+worker/reports.db-shm
+worker/jobs.json
+worker/settings.json
+worker/dataset.json
+
+# Logs and diagnostics, which quote paths and can quote report contents.
+worker/logs/
+worker/diagnostic-report.txt
+
+# Anything exported from the app: these are the actual figures.
+*.csv
+amazon-cash-backup-*.json
+
+# ───────────────────────────────────────────────────────────────────────────
+#  Build output and tooling — rebuilt from source, never committed
+# ───────────────────────────────────────────────────────────────────────────
+node_modules/
+dist-desktop/
+worker/venv/
+worker/__pycache__/
+__pycache__/
+*.pyc
+
+# The packaged installer and its staging folder.
+amazon-cash-planner-setup.zip
+amazon-cash-planner-setup/
+
+# ───────────────────────────────────────────────────────────────────────────
+#  Local scratch
+# ───────────────────────────────────────────────────────────────────────────
+preview.html
+sample-data/
+test-data/
+worker/testdata/*.local.html
+.DS_Store
+Thumbs.db
+
+# Old snapshots of this project. Git history replaces these, and one of
+# them carries a worker token from a previous installation.
+backup/

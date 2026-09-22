@@ -1,0 +1,11 @@
+profile/
+downloads/
+logs/
+venv/
+config.json
+settings.json
+selectors.json
+
+jobs.json
+jobs.tmp
+diagnostic-report.txt

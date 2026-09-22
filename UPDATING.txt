@@ -1,0 +1,78 @@
+================================================================
+  UPDATING AN INSTALLATION YOU ALREADY HAVE
+================================================================
+
+Updating the app in your browser does NOT update the helper on
+your computer. The helper is Python files sitting in a folder,
+and they only change when you replace them.
+
+----------------------------------------------------------------
+  WHAT TO DO
+----------------------------------------------------------------
+
+  1. Find the folder you installed last time. It is the one
+     containing START-HERE.txt and a "worker" folder.
+
+  2. Extract this new ZIP somewhere temporary (your Downloads
+     folder is fine). You get a folder called
+     amazon-cash-planner.
+
+  3. Copy everything from the NEW amazon-cash-planner folder
+     over your OLD installation folder, choosing "Replace the
+     files in the destination" when Windows asks.
+
+     It is safe. The files that hold your data are not in the
+     ZIP, so they cannot be overwritten:
+
+         worker\profile\        your Amazon sign-in
+         worker\selectors.json  your recorded report setup
+         worker\config.json     your helper token
+         worker\settings.json   your countries / account type
+         worker\venv\           the installed Python bits
+         worker\downloads\      previously fetched CSVs
+
+  4. Open the worker folder in your OLD installation and
+     double-click:   UPDATE
+
+     It stops the running helper, refreshes the environment,
+     and starts the new code.
+
+----------------------------------------------------------------
+  WHY STOPPING MATTERS
+----------------------------------------------------------------
+
+  The helper loads its Python files once, when it starts. A
+  helper that was already running keeps using the OLD code even
+  after you replace the files. UPDATE handles the stop and start
+  for you.
+
+  To do it by hand instead:
+
+    Stop:   close the minimised "Amazon data helper" window,
+            or in Task Manager end the python.exe running
+            worker.py
+    Start:  double-click the Desktop shortcut, or
+            worker\start-helper.cmd
+
+----------------------------------------------------------------
+  HOW TO TELL THE NEW CODE IS RUNNING
+----------------------------------------------------------------
+
+  Open the app and go to Data & Assumptions.
+  In "Download from Amazon" you should now see:
+
+      - a row of country buttons (United States, Canada, ...)
+      - an "Account type" box offering All (Unified Reports)
+
+  If you do not see those, the old helper is still running.
+
+----------------------------------------------------------------
+  WHAT ABOUT MY IMPORTED DATA?
+----------------------------------------------------------------
+
+  Imports live in your browser, not in these files, so updating
+  the helper does not touch them.
+
+  If you want to move them between the local app and the hosted
+  one, use Export a backup / Restore from backup on the
+  Data & Assumptions page. See START-HERE.txt.

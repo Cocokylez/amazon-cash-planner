@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "fba-cash-web",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["D:/Projects/Apps/fba-profit-organizer-web/server.js"],
+      "port": 5178
+    }
+  ]
+}

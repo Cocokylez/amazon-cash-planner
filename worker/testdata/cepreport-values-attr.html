@@ -1,0 +1,218 @@
+<!doctype html><html><body>
+<!--
+  Built from the seller's screenshots AND from the attribute list the
+  real page reported: kat-dropdown[multiple,multiple-hide-select,values]
+  holding kat-checkbox[id,tabindex] whose text is inside its shadow root.
+
+    * Marketplace is a dropdown holding TICK BOXES against country CODES -
+      BR, MX, CA, US - not country names. So "United States" has to be matched
+      to a box labelled "US".
+    * Date Range offers Next 7 / Next 30 / Next 120 / Custom date range.
+    * Choosing "Custom date range" REVEALS From and To boxes, and those are
+      how the app's own reporting period reaches the report.
+    * Generate Report stays disabled until a marketplace, a range, and - for a
+      custom range - both dates are set, plus all six options.
+-->
+<div class="hd">Step 1: Select Report Aggregation Levels</div>
+
+<span class="lbl">Marketplace</span>
+<kat-dropdown id="mp" label="Marketplace"></kat-dropdown>
+
+<span class="lbl">Data aggregation level</span>
+<kat-dropdown id="agg" label="Data aggregation level"></kat-dropdown>
+
+<span class="lbl">Date Range</span>
+<kat-dropdown id="dr" label="Date Range"></kat-dropdown>
+
+<span id="dates" style="display:none">
+  <span class="lbl">From</span><input id="from" type="text">
+  <span class="lbl">To</span><input id="to" type="text">
+</span>
+
+<div class="hd">Step 2: Set Report Configurations</div>
+<div class="hd2">Simplified Report Configuration Options</div>
+<div id="opts">
+  <kat-checkbox label="Fulfillment base rate and surcharges"></kat-checkbox>
+  <kat-checkbox label="Sales Data"></kat-checkbox>
+  <kat-checkbox label="Storage Fee base rate and surcharges"></kat-checkbox>
+  <kat-checkbox label="Return and refund fees"></kat-checkbox>
+  <kat-checkbox label="Referral and closing fees"></kat-checkbox>
+  <kat-checkbox label="Advertising Spend Data"></kat-checkbox>
+</div>
+
+<div class="hd2">Add Notes</div>
+<textarea id="notes" placeholder="Add custom notes to this report, tailoring insights to your needs (Max 50 characters)." maxlength="50"></textarea>
+
+<kat-button id="gen" label="Generate Report" disabled></kat-button>
+
+<div class="hd2">Generated Reports</div>
+<table><tbody id="rows"></tbody></table>
+
+<script>
+const picked = { mp: null, dr: null };
+
+class KatCheckbox extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<label style="display:block;width:220px;height:20px">'
+      + '<input type="checkbox"> ' + this.getAttribute('label') + '</label>';
+    r.querySelector('input').addEventListener('change', () => {
+      this.setAttribute('aria-checked', r.querySelector('input').checked);
+      revalidate();
+    });
+  }
+}
+customElements.define('kat-checkbox', KatCheckbox);
+
+/* A tick box with NO label attribute. The country code is inside its shadow
+   root, next to a flag - exactly as the real one reported itself:
+   <kat-checkbox id,tabindex> (shadow: open, properties: value="on"). */
+class KatCodeCheckbox extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<span style="display:inline-block;width:150px;height:22px">'
+      + '<input type="checkbox" value="on"> '
+      + '<img alt="" width="12" height="9"> '
+      + this.getAttribute('data-code') + '</span>';
+  }
+}
+customElements.define('kat-code-checkbox', KatCodeCheckbox);
+
+class KatDropdown extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    this.boxes = this.id === 'mp';          /* the marketplace list ticks */
+    this._value = this.id === 'agg' ? 'MSKU' : (this.id === 'mp' ? [] : '');
+    this._options = this.id === 'mp'
+      /* CODES, with a flag image beside each - as on the real page. */
+      ? [{ name: 'BR', value: 'BR' }, { name: 'MX', value: 'MX' },
+         { name: 'CA', value: 'CA' }, { name: 'US', value: 'US' }]
+      : this.id === 'dr'
+        ? [{ name: 'Next 7 days', value: 'N7' },
+           { name: 'Next 30 days', value: 'N30' },
+           { name: 'Next 120 days', value: 'N120' },
+           { name: 'Custom date range', value: 'CUSTOM' }]
+        : [{ name: 'MSKU', value: 'MSKU' }];
+
+    Object.defineProperty(this, 'options', { get: () => this._options, configurable: true });
+    Object.defineProperty(this, 'value', {
+      get: () => this._value,
+      set: v => { this._value = v; this.render(); },   /* display only */
+      configurable: true,
+    });
+    if (this.id === 'mp') {
+      this.setAttribute('multiple', '');
+      this.setAttribute('multiple-hide-select', '');
+      this.setAttribute('placeholder', 'Select');
+      /* `values`, not `options`. */
+      this.setAttribute('values', JSON.stringify(this._options));
+    } else {
+      this.setAttribute('options', JSON.stringify(this._options));
+    }
+    this.open = false;
+    this.render();
+  }
+
+  render() {
+    const r = this.shadowRoot;
+    if (!r) return;
+    const v = Array.isArray(this._value) ? this._value : [this._value];
+    const shown = this._options.filter(o => v.indexOf(o.value) >= 0)
+      .map(o => o.name).join(', ');
+    r.innerHTML = '<div class="face" style="width:200px;height:24px;'
+      + 'border:1px solid #888">' + (shown || '') + '</div>'
+      + (this.open
+        ? '<div class="panel" style="border:1px solid #ccc">'
+          + this._options.map(o => '<div class="opt" data-v="' + o.value
+              + '" style="width:200px;height:24px">'
+              + (this.boxes
+                  ? '<kat-code-checkbox id="mk-' + o.value + '" tabindex="0" '
+                    + 'data-code="' + o.name + '"></kat-code-checkbox>'
+                  : o.name) + '</div>').join('')
+          + '</div>'
+        : '');
+
+    r.querySelector('.face').onclick = () => { this.open = !this.open; this.render(); };
+    for (const el of r.querySelectorAll('.opt')) {
+      el.onclick = ev => {
+        const val = el.getAttribute('data-v');
+        if (this.boxes) {
+          /* Only a click that reaches the real input counts. */
+          const host = el.querySelector('kat-code-checkbox');
+          const inner = host && host.shadowRoot
+            && host.shadowRoot.querySelector('input');
+          if (!inner || !ev.composedPath || ev.composedPath().indexOf(inner) < 0) {
+            if (inner) inner.checked = !inner.checked; else return;
+          }
+          const cur = Array.isArray(this._value) ? this._value.slice() : [];
+          const at = cur.indexOf(val);
+          if (at >= 0) cur.splice(at, 1); else cur.push(val);
+          this._value = cur;
+          picked.mp = cur.length ? cur : null;
+        } else {
+          this._value = val;
+          picked[this.id] = val;
+          this.open = false;
+          if (this.id === 'dr') {
+            document.getElementById('dates').style.display =
+              (val === 'CUSTOM') ? 'inline' : 'none';
+          }
+        }
+        this.render();
+        revalidate();
+      };
+    }
+  }
+}
+customElements.define('kat-dropdown', KatDropdown);
+
+class KatButton extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<button style="width:150px;height:28px">'
+      + this.getAttribute('label') + '</button>';
+    r.querySelector('button').addEventListener('click', () => {
+      if (this.hasAttribute('disabled')) return;
+      const note = document.getElementById('notes').value || '(none)';
+      const range = document.getElementById('from').value + ' - '
+        + document.getElementById('to').value;
+      document.getElementById('rows').innerHTML =
+        '<tr><td>' + range + '</td><td>' + note + '</td><td>Pending</td></tr>';
+      setTimeout(() => {
+        sessionStorage.setItem('acp-cd-row', JSON.stringify([range, note]));
+        renderRow(range, note);
+      }, 1200);
+    });
+  }
+}
+customElements.define('kat-button', KatButton);
+
+const CSV = ['MSKU,Marketplace,Units Sold,Net Sales,FBA Fulfilment Fee,'
+  + 'Referral Fee,Storage Fee,Advertising Spend,Returns',
+  'DEMO-001,US,120,2400.00,-360.00,-360.00,-18.00,-140.00,-42.00',
+  'DEMO-002,US,45,1125.00,-180.00,-168.75,-9.00,-60.00,-25.00',
+  'DEMO-003,US,18,410.00,-72.00,-61.50,-4.00,-20.00,0.00']
+  .join(String.fromCharCode(10));
+
+function renderRow(range, note) {
+  document.getElementById('rows').innerHTML =
+    '<tr><td>' + range + '</td><td>' + note
+    + '</td><td>Ready</td><td><a href="data:text/csv;charset=utf-8,'
+    + encodeURIComponent(CSV) + '" download="report.csv">Download</a></td></tr>';
+}
+const kept = sessionStorage.getItem('acp-cd-row');
+if (kept) { const [rg, nt] = JSON.parse(kept); renderRow(rg, nt); }
+
+function revalidate() {
+  const boxes = [...document.querySelectorAll('#opts kat-checkbox')];
+  const allTicked = boxes.every(b => b.getAttribute('aria-checked') === 'true');
+  const needDates = picked.dr === 'CUSTOM';
+  const haveDates = !!document.getElementById('from').value
+                 && !!document.getElementById('to').value;
+  document.getElementById('gen').toggleAttribute('disabled',
+    !(allTicked && picked.mp && picked.dr && (!needDates || haveDates)));
+}
+for (const id of ['from', 'to']) {
+  document.getElementById(id).addEventListener('input', revalidate);
+}
+</script></body></html>

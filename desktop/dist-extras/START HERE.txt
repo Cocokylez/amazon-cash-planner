@@ -1,0 +1,72 @@
+AMAZON CASH PLANNER
+Two steps. About five minutes, most of it waiting.
+
+
+WHAT THIS IS
+
+  It reads your Amazon Seller Central reports and works out what cash
+  is actually coming, and when. Everything stays on this computer.
+  Nothing is uploaded, no account is created, nothing is purchased.
+
+
+STEP 1 - INSTALL THE APP
+
+  Double-click:
+
+      Amazon Cash Planner Setup 4.7.0.exe
+
+  Windows will probably say "Windows protected your PC". That is
+  because this installer is not signed with a paid certificate, not
+  because anything is wrong with it. Click "More info", then
+  "Run anyway".
+
+  Takes about a minute.
+
+
+STEP 2 - SET UP THE HELPER
+
+  Double-click:
+
+      Set up the helper.cmd
+
+  This installs a small helper that signs in to Seller Central as you
+  and downloads your reports. It needs the internet once, to fetch a
+  browser - that download is a few hundred megabytes, so give it a
+  few minutes.
+
+  If a black window appears and sits there for a while, that is the
+  download. Leave it alone until it says Done.
+
+
+THEN
+
+  Open "Amazon Cash Planner" from your Desktop or Start menu.
+
+  The first time, it will ask you to sign in to Amazon in a browser
+  window it opens. That is Amazon's own sign-in page. Your password is
+  never seen by this app - the browser keeps the session, on this
+  computer.
+
+
+IF STEP 2 SAYS PYTHON IS MISSING
+
+  The helper is a small Python program, so Python has to be on this
+  computer once. The window will offer to open the download page.
+  When installing Python, tick "Add python.exe to PATH" on the first
+  screen. Then run "Set up the helper.cmd" again.
+
+
+IF SOMETHING GOES WRONG
+
+  Nothing here damages anything, and every step can be run again.
+
+  Inside the installed folder there is a DIAGNOSE.cmd that prints what
+  is and is not working. The installed folder is usually:
+
+      C:\Users\<you>\AppData\Local\Programs\Amazon Cash Planner
+
+
+WHAT IT DOES NOT DO YET
+
+  This copy does not update itself. Updates have to be installed the
+  same way as this one, by hand. That is being worked on.

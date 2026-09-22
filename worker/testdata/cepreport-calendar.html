@@ -1,0 +1,178 @@
+<!doctype html><html><body>
+<!--
+  The page as the seller's own error report described it, and nothing more.
+
+    "Marketplace could not be read: it lists no choices"
+        -> the control never publishes its options anywhere.
+    "a tick boxes offering '', '', '', ''"
+        -> the country code is a SIBLING of the tick box, not inside it, so
+           asking the box what it is called returns nothing.
+
+  Each row is [kat-checkbox] [flag] [US], and only the tick box responds -
+  clicking the letters beside it does nothing, as on the real page.
+-->
+<div class="hd">Step 1: Select Report Aggregation Levels</div>
+
+<span class="lbl">Marketplace</span>
+<kat-dropdown id="mp" label="Marketplace" multiple values=""></kat-dropdown>
+
+<span class="lbl">Date Range</span>
+<kat-dropdown id="dr" label="Date Range"></kat-dropdown>
+
+<span id="dates" style="display:none">
+  <span class="lbl">From</span><input id="from" type="text">
+  <span class="lbl">To</span><input id="to" type="text">
+</span>
+
+<div class="hd2">Simplified Report Configuration Options</div>
+<div id="opts">
+  <kat-checkbox label="Fulfillment base rate and surcharges"></kat-checkbox>
+  <kat-checkbox label="Sales Data"></kat-checkbox>
+  <kat-checkbox label="Storage Fee base rate and surcharges"></kat-checkbox>
+  <kat-checkbox label="Return and refund fees"></kat-checkbox>
+  <kat-checkbox label="Referral and closing fees"></kat-checkbox>
+  <kat-checkbox label="Advertising Spend Data"></kat-checkbox>
+</div>
+
+<div class="hd2">Add Notes</div>
+<textarea id="notes" placeholder="Add custom notes to this report, tailoring insights to your needs (Max 50 characters)." maxlength="50"></textarea>
+
+<kat-button id="gen" label="Generate Report" disabled></kat-button>
+
+<div class="hd2">Generated Reports</div>
+<table><tbody id="rows"></tbody></table>
+
+<script>
+const picked = { mp: [], dr: null };
+
+class KatCheckbox extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    const lbl = this.getAttribute('label');
+    r.innerHTML = '<label style="display:inline-block;width:'
+      + (lbl ? 220 : 20) + 'px;height:20px"><input type="checkbox" value="on">'
+      + (lbl ? ' ' + lbl : '') + '</label>';
+    r.querySelector('input').addEventListener('change', revalidate);
+    this.isOn = () => r.querySelector('input').checked;
+  }
+}
+customElements.define('kat-checkbox', KatCheckbox);
+
+class KatDropdown extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    this.multi = this.hasAttribute('multiple');
+    this.rows = this.multi
+      ? ['BR', 'MX', 'CA', 'US']
+      : ['Next 7 days', 'Next 30 days', 'Next 120 days', 'Custom date range'];
+    /* Nothing is ever published: `values` stays empty on purpose. */
+    this.open = false;
+    this.render();
+  }
+
+  render() {
+    const r = this.shadowRoot;
+    const shown = this.multi ? picked.mp.join(', ') : (picked.dr || '');
+    r.innerHTML = '<div class="face" style="width:190px;height:24px;'
+      + 'border:1px solid #888">' + shown + '</div>'
+      + (this.open
+        ? '<div class="panel" style="border:1px solid #ccc">'
+          + this.rows.map(v => '<div class="opt" data-v="' + v
+              + '" style="width:190px;height:26px">'
+              + (this.multi
+                ? '<kat-checkbox id="mk-' + v + '" tabindex="0"></kat-checkbox>'
+                  + '<img alt="" width="12" height="9"><span>' + v + '</span>'
+                : v)
+              + '</div>').join('')
+          + '</div>'
+        : '');
+
+    r.querySelector('.face').onclick = () => { this.open = !this.open; this.render(); };
+
+    for (const el of r.querySelectorAll('.opt')) {
+      el.onclick = ev => {
+        const v = el.getAttribute('data-v');
+        if (this.multi) {
+          /* Only the tick box counts. Clicking the letters does nothing. */
+          const box = el.querySelector('kat-checkbox');
+          const path = ev.composedPath ? ev.composedPath() : [];
+          if (!box || path.indexOf(box) < 0) return;
+          const at = picked.mp.indexOf(v);
+          if (at >= 0) picked.mp.splice(at, 1); else picked.mp.push(v);
+        } else {
+          picked.dr = v;
+          this.open = false;
+          document.getElementById('dates').style.display =
+            (v === 'Custom date range') ? 'inline' : 'none';
+        }
+        this.render();
+        revalidate();
+      };
+    }
+  }
+}
+customElements.define('kat-dropdown', KatDropdown);
+
+class KatButton extends HTMLElement {
+  connectedCallback() {
+    const r = this.attachShadow({ mode: 'open' });
+    r.innerHTML = '<button style="width:150px;height:28px">'
+      + this.getAttribute('label') + '</button>';
+    r.querySelector('button').onclick = () => {
+      if (this.hasAttribute('disabled')) return;
+      const note = document.getElementById('notes').value || '(none)';
+      document.getElementById('rows').innerHTML =
+        '<tr><td>SKU</td><td>' + note + '</td><td>Pending</td></tr>';
+      setTimeout(() => {
+        sessionStorage.setItem('acp-nl-row', note);
+        renderRow(note);
+      }, 1200);
+    };
+  }
+}
+customElements.define('kat-button', KatButton);
+
+const CSV = ['MSKU,Marketplace,Units Sold,Net Sales,FBA Fulfilment Fee,'
+  + 'Referral Fee,Storage Fee,Advertising Spend,Returns',
+  'DEMO-001,US,120,2400.00,-360.00,-360.00,-18.00,-140.00,-42.00',
+  'DEMO-002,US,45,1125.00,-180.00,-168.75,-9.00,-60.00,-25.00']
+  .join(String.fromCharCode(10));
+
+function renderRow(note) {
+  document.getElementById('rows').innerHTML =
+    '<tr><td>SKU</td><td>' + note + '</td><td>Ready</td>'
+    + '<td><a href="data:text/csv;charset=utf-8,' + encodeURIComponent(CSV)
+    + '" download="report.csv">Download</a></td></tr>';
+}
+const kept = sessionStorage.getItem('acp-nl-row');
+if (kept) renderRow(kept);
+
+function revalidate() {
+  const boxes = [...document.querySelectorAll('#opts kat-checkbox')];
+  const all = boxes.every(b => b.isOn && b.isOn());
+  const needDates = picked.dr === 'Custom date range';
+  const haveDates = !!document.getElementById('from').value
+                 && !!document.getElementById('to').value;
+  document.getElementById('gen').toggleAttribute('disabled',
+    !(all && picked.mp.length && picked.dr && (!needDates || haveDates)));
+}
+for (const id of ['from', 'to']) {
+  const box = document.getElementById(id);
+
+  /* A calendar that owns the box. It redraws on focus and puts today's date
+     back, wiping anything merely assigned to the field. Typing is different:
+     each keystroke marks the box as edited by a person, and the calendar
+     leaves it alone. */
+  const today = '09/22/2026';
+  box.addEventListener('focus', () => {
+    if (!box.dataset.typed) { box.value = today; revalidate(); }
+  });
+  box.addEventListener('keydown', () => { box.dataset.typed = '1'; });
+  box.addEventListener('input', revalidate);
+
+  /* And a redraw a moment later, as a real picker does. */
+  box.addEventListener('blur', () => {
+    if (!box.dataset.typed) { box.value = today; revalidate(); }
+  });
+}
+</script></body></html>
