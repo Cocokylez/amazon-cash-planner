@@ -334,6 +334,36 @@ async function boot() {
     before = await portState(cfg);
   }
 
+  /* A helper left over from the previous version.
+
+     The app and the helper ship together and are released in lockstep. An
+     update replaces the helper's files, but a Python process already running
+     keeps the old code in memory - so the app would come back updated, find
+     that process healthy, and quietly serve everything from the version it
+     just replaced. The About panel could say "Mismatch" for days while every
+     fix sat unused on disk.
+
+     Restarting it is the whole fix. It is this app's own helper, asked
+     through its own shutdown endpoint, never forced. */
+  if (before === 'ours') {
+    const running = await H.helperVersion(cfg);
+    if (running && running !== app.getVersion()) {
+      say('The helper is still running ' + running + ' and this app is '
+        + app.getVersion() + '. Restarting it so the update takes effect…',
+        'working');
+      const stopped = await H.askSiblingToStop(cfg, ROOT());
+      if (stopped) {
+        before = await portState(cfg);
+      } else {
+        say('The helper is running ' + running + ' but this app is '
+          + app.getVersion() + ', and it did not stop when asked. Close this '
+          + 'app completely and open it again. Nothing was forced.',
+          'stopped');
+        return;
+      }
+    }
+  }
+
   weStartedIt = H.shouldStopHelper(before);
   if (!weStartedIt) say('The helper was already running.', 'working');
 

@@ -516,5 +516,64 @@ const H = require('../desktop/helper.js');
       /u\.ready/.test(bar) && /'available'/.test(bar));
   }
 
+  /* A helper left over from the previous version.
+
+     This is what made every Supabase fix look like it had not worked: the
+     app updated, the helper's files were replaced, but the running Python
+     process kept the old code in memory. The app found it healthy, said
+     "already running", and served everything from the version it had just
+     replaced - for hours. */
+  {
+    const serveVersion = (v, extra) => new Promise(resolve => {
+      const srv2 = http.createServer((req, res) => {
+        if (req.url.startsWith('/api/health')) {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(Object.assign(
+            { ok: true, worker: 'fba-local-worker', version: v }, extra || {})));
+          return;
+        }
+        res.writeHead(404); res.end();
+      });
+      srv2.listen(0, '127.0.0.1', () => resolve(srv2));
+    });
+
+    let s2 = await serveVersion('4.9.14');
+    const cfg2 = { port: s2.address().port, token: 'x' };
+    T.eq('the running helper\'s version can be read',
+      await H.helperVersion(cfg2), '4.9.14');
+    await new Promise(r => s2.close(r));
+
+    /* The distinction that matters: which version is LOADED, not which is
+       installed. A file on disk proves nothing about a running process. */
+    s2 = await serveVersion('4.9.16');
+    T.eq('a current helper reports the current version',
+      await H.helperVersion({ port: s2.address().port, token: 'x' }), '4.9.16');
+    await new Promise(r => s2.close(r));
+
+    const srv3 = http.createServer((req, res) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ hello: 'not the worker', version: '9.9.9' }));
+    });
+    await new Promise(r => srv3.listen(0, '127.0.0.1', r));
+    T.eq('a stranger is never read for a version',
+      await H.helperVersion({ port: srv3.address().port, token: 'x' }), null);
+    await new Promise(r => srv3.close(r));
+
+    T.eq('and nothing listening is not a version',
+      await H.helperVersion({ port: 1, token: 'x' }, 600), null);
+
+    /* The app must ACT on a mismatch, not just report one. Reporting it is
+       what it already did, in a panel, while staying broken. */
+    const fs3 = require('fs');
+    const main = fs3.readFileSync(
+      require('path').join(__dirname, '..', 'desktop', 'main.js'), 'utf8');
+    T.ok('the app compares the running helper against itself',
+      /helperVersion\(cfg\)[\s\S]{0,300}app\.getVersion\(\)/.test(main));
+    T.ok('and asks a stale one to stop rather than using it',
+      /running !== app\.getVersion\(\)[\s\S]{0,500}askSiblingToStop/.test(main));
+    T.ok('and says so plainly when it will not stop',
+      /did not stop when asked[\s\S]{0,120}Nothing was forced/.test(main));
+  }
+
   T.report();
 })();

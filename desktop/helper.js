@@ -185,6 +185,36 @@ function instanceId(root) {
    and therefore one token. A STRANGER is still never touched: ending
    somebody's unrelated work to save them a click is not a trade this program
    gets to make. */
+/* What version the helper ON THE PORT is actually running.
+
+   Not what is installed - what is loaded. An update replaces the helper's
+   .py files, but a Python process already running keeps the old code in
+   memory until it is restarted. The app would then find a healthy helper,
+   report "already running", and serve every request from the previous
+   version, with the fixes sitting unused on disk. */
+function helperVersion(cfg, timeout) {
+  return new Promise(resolve => {
+    const req = http.request({
+      host: '127.0.0.1', port: cfg.port, path: '/api/health',
+      timeout: timeout || 2000,
+      headers: { 'X-Worker-Token': cfg.token },
+    }, res => {
+      let body = '';
+      res.on('data', d => { body += d; });
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(body);
+          resolve(parsed.worker === 'fba-local-worker'
+            ? (parsed.version || null) : null);
+        } catch (e) { resolve(null); }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+    req.on('error', () => resolve(null));
+    req.end();
+  });
+}
+
 function portState(cfg, timeout, root) {
   return new Promise(resolve => {
     const req = http.request({
@@ -351,7 +381,7 @@ function updateStatus(feed, outcome, detail) {
 
 module.exports = {
   appRoot, dataDir, pythonPath, readConfig, portState,
-  instanceId, askSiblingToStop,
+  instanceId, askSiblingToStop, helperVersion,
   findPython, setupState,
   readLauncherOutput, strangerOnPort, shouldStopHelper, setupNeeded,
   updateFeed, updateStatus,
