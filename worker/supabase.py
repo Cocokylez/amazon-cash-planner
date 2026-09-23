@@ -285,55 +285,124 @@ def _write_secret(here: Path) -> tuple[str, str] | None:
     return (url, key) if url and key else None
 
 
-def test(url: str, key: str) -> dict:
-    """Actually talk to the project. This is the only thing that proves it.
+def is_jwt(key: str) -> bool:
+    """Three dot-separated parts with a decodable middle. Not a guess."""
+    key = (key or "").strip()
+    return key.count(".") == 2 and _peek(key) is not None
 
-    Returns {ok, detail} - and ok is True only when a request went out and
-    came back recognisable as Supabase.
+
+def _headers(key: str, bearer: bool) -> dict:
+    """The headers for one attempt.
+
+    Authorization: Bearer carries a USER's access token. Supabase's older anon
+    keys happened to be JWTs, so putting one there worked by accident and the
+    habit stuck. The newer sb_publishable_ keys are not JWTs: the auth layer
+    tries to parse one as a token, fails, and rejects the request as "Invalid
+    API key" - which reads exactly like a mistyped key and sends people off to
+    copy it again and again. It was never the key.
+
+    apikey alone identifies the project and is always correct.
     """
-    problem = check_shape(url, key)
-    if problem:
-        return {"ok": False, "detail": problem}
+    h = {"apikey": key.strip(), "Accept": "application/json"}
+    if bearer:
+        h["Authorization"] = "Bearer " + key.strip()
+    return h
 
-    endpoint = url.strip().rstrip("/") + "/rest/v1/"
-    req = urllib.request.Request(endpoint, headers={
-        "apikey": key.strip(),
-        "Authorization": "Bearer " + key.strip(),
-        "Accept": "application/json",
-    })
 
+def _attempt(endpoint: str, key: str, bearer: bool) -> dict:
+    """One request. Reports what came back without deciding what it means."""
+    req = urllib.request.Request(endpoint, headers=_headers(key, bearer))
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT_S) as res:
-            body = res.read(2048).decode("utf-8", "replace")
-            if res.status >= 400:
-                return {"ok": False, "detail":
-                        "The project answered with %d: %s"
-                        % (res.status, body[:160])}
-            wrong = _not_a_database(res, body)
-            if wrong:
-                return {"ok": False, "detail": wrong}
-            return {"ok": True, "detail":
-                    "The project answered. This is a real connection, not "
-                    "a saved setting."}
+            return {"status": res.status,
+                    "ctype": res.headers.get("content-type") or "",
+                    "server": res.headers.get("server") or "",
+                    "body": res.read(2048).decode("utf-8", "replace")}
     except urllib.error.HTTPError as exc:
         body = ""
         try:
             body = exc.read(512).decode("utf-8", "replace")
         except Exception:
             pass
-        if exc.code in (401, 403):
-            return {"ok": False, "detail":
-                    "The project rejected that key (%d). Check it is the anon "
-                    "key from this project's API settings." % exc.code}
-        return {"ok": False, "detail":
-                "The project answered with %d. %s" % (exc.code, body[:160])}
+        return {"status": exc.code, "ctype": exc.headers.get("content-type")
+                or "", "server": exc.headers.get("server") or "", "body": body}
     except urllib.error.URLError as exc:
-        return {"ok": False, "detail":
+        return {"unreachable":
                 "Could not reach %s (%s). Nothing was saved or sent."
                 % (endpoint, str(getattr(exc, "reason", exc))[:120])}
     except Exception as exc:
+        return {"unreachable": "The connection could not be tested (%s)."
+                              % str(exc)[:120]}
+
+
+class _Reply:
+    """What _not_a_database inspects: just the headers, by name."""
+
+    def __init__(self, got):
+        self._h = {"server": got.get("server", ""),
+                   "content-type": got.get("ctype", "")}
+
+    @property
+    def headers(self):
+        return self
+
+    def get(self, name, default=None):
+        return self._h.get(str(name).lower(), default)
+
+
+def test(url: str, key: str) -> dict:
+    """Actually talk to the project. This is the only thing that proves it.
+
+    Returns {ok, detail} - and ok is True only when a request went out and
+    came back recognisable as a database.
+    """
+    problem = check_shape(url, key)
+    if problem:
+        return {"ok": False, "detail": problem}
+
+    key = key.strip()
+    endpoint = url.strip().rstrip("/") + "/rest/v1/"
+
+    # The right header shape for this kind of key first, then the other one.
+    # Both are tried rather than assumed: being wrong here produces "Invalid
+    # API key", a message that blames the key and hides the real cause.
+    got = None
+    for bearer in (is_jwt(key), not is_jwt(key)):
+        got = _attempt(endpoint, key, bearer)
+        if got.get("unreachable"):
+            return {"ok": False, "detail": got["unreachable"]}
+        if got["status"] < 400:
+            break
+
+    if got["status"] < 400:
+        wrong = _not_a_database(_Reply(got), got["body"])
+        if wrong:
+            return {"ok": False, "detail": wrong}
+        return {"ok": True, "detail":
+                "The project answered. This is a real connection, not a "
+                "saved setting."}
+
+    code, body = got["status"], got["body"]
+    if code in (401, 403):
+        # The project's own words, kept. "Invalid API key" and "No API key
+        # found in request" are different problems with different fixes, and
+        # discarding the body to print generic advice made both the same dead
+        # end.
+        said = ""
+        try:
+            said = (json.loads(body) or {}).get("message") or ""
+        except Exception:
+            said = body[:160]
+        # The shape of what was sent, never the value.
+        shape = "%d characters, starts %s" % (len(key), key[:15] or "?")
         return {"ok": False, "detail":
-                "The connection could not be tested (%s)." % str(exc)[:120]}
+                "The project rejected that key (%d)%s You sent %s. Copy it "
+                "with the button beside the key in Project Settings > API "
+                "Keys - selecting the masked text gives a cut-off key that "
+                "looks right."
+                % (code, (": " + said + ".") if said else ".", shape)}
+    return {"ok": False, "detail":
+            "The project answered with %d. %s" % (code, body[:160])}
 
 
 def save(here: Path, url: str, key: str, result: dict) -> dict:
@@ -545,12 +614,12 @@ def _upsert(url: str, key: str, table: str, payload: list) -> str | None:
     req = urllib.request.Request(
         url.rstrip("/") + "/rest/v1/" + table,
         data=body, method="POST",
-        headers={
-            "apikey": key,
-            "Authorization": "Bearer " + key,
+        # Same header rule as the connection test, for the same reason: a
+        # non-JWT key in Authorization is rejected as an invalid token.
+        headers=dict(_headers(key, is_jwt(key)), **{
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates,return=minimal",
-        })
+        }))
     try:
         with urllib.request.urlopen(req, timeout=PUSH_TIMEOUT_S) as res:
             if res.status < 300:

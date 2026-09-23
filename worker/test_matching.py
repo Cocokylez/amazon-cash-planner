@@ -1699,6 +1699,76 @@ check("but stops the push", SB.push(_ph, _pdb, archive=AR)["ok"], False)
 _srv.shutdown()
 
 
+section("Authorization: Bearer is not where a publishable key goes")
+
+# This one cost a real person a long time. Supabase's older anon keys were
+# JWTs, so sending one as a Bearer token worked by accident. The newer
+# sb_publishable_ keys are not JWTs: the auth layer tries to parse one as an
+# access token, fails, and answers "Invalid API key" - which blames the key
+# and hides the cause. Three fresh keys were copied before the headers were
+# suspected.
+
+check("a JWT is recognised", SB.is_jwt(_jwt("anon")), True)
+check("a publishable key is not a JWT",
+      SB.is_jwt("sb_publishable_" + "x" * 30), False)
+check("nor is a secret key", SB.is_jwt("sb_secret_" + "x" * 30), False)
+check("a JWT key is sent in both headers",
+      "Authorization" in SB._headers(_jwt("anon"), True), True)
+check("a publishable key is sent in apikey alone",
+      "Authorization" in SB._headers("sb_publishable_x", False), False)
+check("and apikey is always there",
+      SB._headers("sb_publishable_x", False)["apikey"], "sb_publishable_x")
+
+
+class _Picky(BaseHTTPRequestHandler):
+    """Supabase's behaviour with a new-format key: a Bearer token that is not
+    a JWT fails the whole request, apikey alone succeeds."""
+
+    def do_GET(self):
+        if self.headers.get("Authorization"):
+            b = b'{"message":"Invalid API key","hint":"Double check your API key."}'
+            self.send_response(401)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        b = b'{"swagger":"2.0","paths":{}}'
+        self.send_response(200)
+        self.send_header("Content-Type", "application/openapi+json")
+        self.send_header("Server", "postgrest/12.2.0")
+        self.send_header("Content-Length", str(len(b)))
+        self.end_headers()
+        self.wfile.write(b)
+
+    def log_message(self, *a):
+        pass
+
+
+_p = HTTPServer(("127.0.0.1", 0), _Picky)
+_th.Thread(target=_p.serve_forever, daemon=True).start()
+_purl = "http://127.0.0.1:%d" % _p.server_address[1]
+
+# check_shape refuses a non-https URL, so the shape check is stood down for
+# the duration - what is under test here is the request, not the address.
+_real_shape = SB.check_shape
+SB.check_shape = lambda u, k: None
+try:
+    _r = SB.test(_purl, "sb_publishable_" + "z" * 30)
+    check("a publishable key now connects", _r["ok"], True)
+    check("and it is a real answer, not a saved setting",
+          "real connection" in _r["detail"], True)
+
+    # The other direction still has to work: a JWT key is tried with Bearer
+    # first and must not be broken by the fix.
+    _r2 = SB.test(_purl, _jwt("anon"))
+    check("a JWT key connects too", _r2["ok"], True)
+finally:
+    SB.check_shape = _real_shape
+    _p.shutdown()
+
+
+
 print("passed %d   failed %d" % (PASS, FAIL))
 if FAILURES:
     print("\nFAILURES")
