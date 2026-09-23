@@ -39,6 +39,16 @@
   .stopped .msg { background: var(--warn-bg); border: 1px solid var(--warn-line);
                   color: var(--warn); padding: 10px 12px; border-radius: 8px; }
   .msg { min-height: 42px; }
+
+  .btnrow { margin-top: 14px; display: none; }
+  .btnrow.show { display: block; }
+  button {
+    font: inherit; font-weight: 600; font-size: 13px;
+    background: var(--accent); color: #fff; border: 0; border-radius: 8px;
+    padding: 9px 16px; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.08); }
+  button:disabled { opacity: 0.55; cursor: default; filter: none; }
 </style>
 </head>
 <body>
@@ -46,17 +56,47 @@
     <h1>Amazon Cash Planner</h1>
     <p class="sub">Your reports stay on this computer.</p>
     <div class="line"><span class="dot"></span><span class="msg" id="msg">Starting&#8230;</span></div>
+    <div class="btnrow" id="btnrow"><button id="act" type="button"></button></div>
   </div>
 
 <script>
   var card = document.getElementById('card');
   var msg = document.getElementById('msg');
-  if (window.shellStatus) {
-    window.shellStatus.on(function (s) {
-      msg.textContent = s.text;
-      card.className = 'card ' + s.kind;
-    });
+  var row = document.getElementById('btnrow');
+  var act = document.getElementById('act');
+  var pending = null;
+
+  function apply(s) {
+    if (!s) return;
+    msg.textContent = s.text;
+    card.className = 'card ' + s.kind;
+    pending = s.action;
+    if (pending && pending.label) {
+      act.textContent = pending.label;
+      act.disabled = false;
+      row.className = 'btnrow show';
+    } else {
+      row.className = 'btnrow';
+    }
   }
+
+  /* Whatever was said before this page could listen. */
+  if (window.shellStatus && window.shellStatus.current) {
+    window.shellStatus.current().then(apply).catch(function () {});
+  }
+
+  /* One way of showing a status, used by both the catch-up and the live
+     feed. Two copies of this drifted apart the moment one was edited. */
+  if (window.shellStatus) {
+    window.shellStatus.on(apply);
+  }
+
+  act.addEventListener('click', function () {
+    if (!pending || !window.shellStatus) return;
+    act.disabled = true;          /* one click is one action */
+    if (pending.kind === 'run-setup') window.shellStatus.runSetup();
+    else if (pending.kind === 'open-python') window.shellStatus.openPython();
+  });
 </script>
 </body>
 </html>

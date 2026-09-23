@@ -17,6 +17,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# Importing worker now decides where this computer keeps its data, and moves
+# anything an older installation left behind. A test run must never do that to
+# the real folder: it would migrate a live installation as a side effect of
+# running the suite. So the data directory is redirected BEFORE the import.
+import os                            # noqa: E402
+os.environ["FBA_DATA_DIR"] = tempfile.mkdtemp(prefix="fba-test-data-")
+
 import seller_central as SC          # noqa: E402
 
 PASS, FAIL = 0, 0
@@ -1341,6 +1348,55 @@ with _patch.object(W, "HERE", _stateHome), \
 
 
 print("\n" + "=" * 68)
+section("Where this computer keeps its own things")
+
+# An installer owns the folder it installs into and replaces it. Everything
+# the helper builds or is given used to live there, so an update deleted a
+# 400 MB environment, the access token, the signed-in Amazon session and the
+# reports database - and setup had to be run again. It happened, going from
+# 4.9.0 to 4.9.1 on a real installation.
+import paths as PATHS                                     # noqa: E402
+
+_po = Path(_t3.mkdtemp())
+_pn = Path(_t3.mkdtemp())
+os.environ["FBA_DATA_DIR"] = str(_pn)
+
+(_po / "config.json").write_text('{"token":"abc","port":8765}', encoding="utf-8")
+(_po / "reports.db").write_text("not really sqlite", encoding="utf-8")
+(_po / "profile").mkdir()
+(_po / "profile" / "Cookies").write_text("session", encoding="utf-8")
+
+_r = PATHS.adopt(_po)
+check("the access token moves out of the install folder",
+      "config.json" in _r["moved"], True)
+check("so does the database", "reports.db" in _r["moved"], True)
+check("and the signed-in browser session", "profile" in _r["moved"], True)
+check("which arrives intact",
+      (_pn / "profile" / "Cookies").read_text(encoding="utf-8"), "session")
+check("the old copy is gone", (_po / "config.json").exists(), False)
+
+# A part-finished copy is the failure that actually happened: moving across
+# drives copies then deletes, and one locked file left 124 MB in the new place
+# and 11 files in the old, reporting nothing wrong either way.
+check("nothing is left half-copied", list(_pn.glob("*.incoming")), [])
+
+(_po / "settings.json").write_text("old", encoding="utf-8")
+(_pn / "settings.json").write_text("newer", encoding="utf-8")
+_r2 = PATHS.adopt(_po)
+check("something already there is never overwritten",
+      (_pn / "settings.json").read_text(encoding="utf-8"), "newer")
+check("and is not claimed as moved", "settings.json" in _r2["moved"], False)
+
+check("a second run has nothing left to do", PATHS.adopt(_po)["moved"], [])
+
+_ps = Path(_t3.mkdtemp())
+os.environ["FBA_DATA_DIR"] = str(_ps)
+(_ps / "config.json").write_text("keep me", encoding="utf-8")
+check("adopting a folder into itself changes nothing",
+      PATHS.adopt(_ps)["moved"], [])
+check("and leaves the file alone",
+      (_ps / "config.json").read_text(encoding="utf-8"), "keep me")
+
 print("passed %d   failed %d" % (PASS, FAIL))
 if FAILURES:
     print("\nFAILURES")

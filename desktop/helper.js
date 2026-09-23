@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const http = require('http');
+const os = require('os');
 const path = require('path');
 
 /* ── where things are ───────────────────────────────────────────────────── */
@@ -22,36 +23,169 @@ function appRoot(opts) {
     : path.join(__dirname, '..');
 }
 
+/* Where this computer keeps its own things.
+ *
+ * MUST agree with worker/paths.py, character for character. They are two
+ * languages looking for the same folder, and when they disagreed the result
+ * was setup succeeding while the app insisted the helper was not set up:
+ * Python wrote the token to the new place, JavaScript looked in the old one,
+ * and neither could tell anything was wrong. There is a test that runs both
+ * and compares.
+ */
+function dataDir() {
+  const override = process.env.FBA_DATA_DIR;
+  if (override) return override;
+
+  const home = os.homedir();
+  if (process.platform === 'win32') {
+    return path.join(process.env.LOCALAPPDATA || home, 'Amazon Cash Planner');
+  }
+  if (process.platform === 'darwin') {
+    return path.join(home, 'Library', 'Application Support',
+      'Amazon Cash Planner');
+  }
+  return path.join(process.env.XDG_DATA_HOME
+    || path.join(home, '.local', 'share'), 'amazon-cash-planner');
+}
+
+/* The data folder first, then beside the code.
+ *
+ * The second is not legacy politeness - an installation part-way through
+ * moving, or one whose migration could not finish, still has its environment
+ * in the old place, and refusing to look there would break a copy that works
+ * perfectly well. */
+function candidates(root, ...parts) {
+  return [path.join(dataDir(), ...parts),
+    path.join(root, 'worker', ...parts)];
+}
+
 function pythonPath(root) {
-  const candidates = process.platform === 'win32'
-    ? [path.join(root, 'worker', 'venv', 'Scripts', 'python.exe')]
-    : [path.join(root, 'worker', 'venv', 'bin', 'python')];
-  for (const c of candidates) if (fs.existsSync(c)) return c;
+  const rel = process.platform === 'win32'
+    ? ['venv', 'Scripts', 'python.exe']
+    : ['venv', 'bin', 'python'];
+  for (const c of candidates(root, ...rel)) {
+    if (fs.existsSync(c)) return c;
+  }
   return null;
 }
 
 function readConfig(root) {
+  for (const c of candidates(root, 'config.json')) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(c, 'utf8'));
+      if (cfg.token && cfg.port) return cfg;
+    } catch (e) { /* try the next one */ }
+  }
+  return null;
+}
+
+/* ── finding a Python to build the environment with ─────────────────────── */
+
+/* Setup needs an interpreter before there is one of its own, so it has to
+   borrow whatever the computer already has. SETUP.cmd has always done this;
+   doing it here too is what lets the app offer a button instead of a file
+   path.
+
+   Order matters: the launcher `py` understands `-3` and picks the newest,
+   which is what someone with several Pythons almost certainly wants. */
+const PYTHON_CANDIDATES = process.platform === 'win32'
+  ? [['py', ['-3']], ['python', []], ['python3', []]]
+  : [['python3', []], ['python', []]];
+
+/* 3.10 is what the helper's code assumes. An older one gets far enough to be
+   confusing and then fails somewhere unrelated, so it is refused by name. */
+const MIN_PYTHON = [3, 10];
+
+function checkPython(exe, args, runner) {
+  const probe = 'import sys; print("%d.%d.%d" % sys.version_info[:3])';
   try {
-    const cfg = JSON.parse(
-      fs.readFileSync(path.join(root, 'worker', 'config.json'), 'utf8'));
-    if (!cfg.token || !cfg.port) return null;
-    return cfg;
+    const out = runner(exe, args.concat(['-c', probe]));
+    const version = String(out || '').trim().split(/\s+/).pop();
+    const parts = version.split('.').map(Number);
+    if (!parts.length || Number.isNaN(parts[0])) return null;
+    const enough = parts[0] > MIN_PYTHON[0]
+      || (parts[0] === MIN_PYTHON[0] && parts[1] >= MIN_PYTHON[1]);
+    return { exe, args, version, enough };
   } catch (e) {
     return null;
   }
 }
 
+/* Returns one of:
+     { found: true, exe, args, version }
+     { found: false, reason: 'none' }        nothing on this computer
+     { found: false, reason: 'old', version } there is one, but too old
+
+   The two failures are kept apart on purpose: "install Python" and "your
+   Python is from 2019" need completely different things from a person, and
+   telling someone to install what they already have is how they conclude the
+   app is broken. */
+function findPython(runner) {
+  const run = runner || ((exe, args) =>
+    require('child_process').execFileSync(exe, args,
+      { encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'ignore'] }));
+
+  let tooOld = null;
+  for (const [exe, args] of PYTHON_CANDIDATES) {
+    const got = checkPython(exe, args, run);
+    if (!got) continue;
+    if (got.enough) {
+      return { found: true, exe: got.exe, args: got.args, version: got.version };
+    }
+    if (!tooOld) tooOld = got;
+  }
+
+  if (tooOld) {
+    return { found: false, reason: 'old', version: tooOld.version,
+      detail: 'Python ' + tooOld.version + ' is installed, but this needs '
+        + MIN_PYTHON.join('.') + ' or newer. Installing a current version from '
+        + 'python.org and ticking "Add python.exe to PATH" is enough - the old '
+        + 'one can stay.' };
+  }
+  return { found: false, reason: 'none',
+    detail: 'Python is not installed on this computer. The helper is a small '
+      + 'Python program, so it is needed once. It is free, takes a couple of '
+      + 'minutes, and the only thing to watch for is ticking "Add python.exe '
+      + 'to PATH" on the first screen.' };
+}
+
+/* Is the helper ready to run, or does setup still have to happen? */
+function setupState(root) {
+  if (pythonPath(root) && readConfig(root)) return 'ready';
+  if (pythonPath(root)) return 'no-config';
+  return 'no-python';
+}
+
 /* ── who holds the port ─────────────────────────────────────────────────── */
 
+/* Which installation this is, as launch.py computes it: the sha256 of the
+   worker folder's path, lowercased, first 20 hex characters. Two copies of
+   this app installed in different folders have different ids.
+
+   MUST match launch.py's instance_id(). There is a test that runs both. */
+function instanceId(root) {
+  return require('crypto').createHash('sha256')
+    .update(path.join(root, 'worker').toLowerCase())
+    .digest('hex').slice(0, 20);
+}
+
 /* One of:
-     'ours'      the helper for this installation answered
-     'stranger'  something else is on the port
+     'ours'      this very installation's helper answered
+     'sibling'   this app's helper, but from a DIFFERENT installation
+     'stranger'  something else entirely is on the port
      'silent'    nothing answered
 
-   A stranger is NEVER stopped. Killing whatever happens to hold a port is how
-   a cash planner ends someone's unrelated work, and no amount of convenience
-   is worth that. It is named and explained instead. */
-function portState(cfg, timeout) {
+   The middle one used to be missing, and that is what made "Port belongs to
+   another app or installation" a dead end: a second copy of this same app
+   was treated exactly like somebody's unrelated web server, so the only way
+   forward was to go and find it yourself.
+
+   A sibling can be asked to stand down - politely, through its own shutdown
+   endpoint, because every installation on this machine shares one data folder
+   and therefore one token. A STRANGER is still never touched: ending
+   somebody's unrelated work to save them a click is not a trade this program
+   gets to make. */
+function portState(cfg, timeout, root) {
   return new Promise(resolve => {
     const req = http.request({
       host: '127.0.0.1', port: cfg.port, path: '/api/health',
@@ -63,13 +197,42 @@ function portState(cfg, timeout) {
       res.on('end', () => {
         try {
           const parsed = JSON.parse(body);
-          resolve(parsed.worker === 'fba-local-worker' ? 'ours' : 'stranger');
+          if (parsed.worker !== 'fba-local-worker') return resolve('stranger');
+          if (!root || !parsed.instance) return resolve('ours');
+          resolve(parsed.instance === instanceId(root) ? 'ours' : 'sibling');
         } catch (e) { resolve('stranger'); }
       });
     });
     req.on('timeout', () => { req.destroy(); resolve('silent'); });
     req.on('error', () => resolve('silent'));
     req.end();
+  });
+}
+
+/* Ask a sibling to stop, and wait until the port is actually free.
+   Resolves true only when it really has gone - a shutdown that returned 200
+   and then did not happen would leave the next step failing for a reason
+   nobody could see. */
+function askSiblingToStop(cfg, root, waitMs) {
+  return new Promise(resolve => {
+    const req = http.request({
+      host: '127.0.0.1', port: cfg.port, path: '/api/shutdown',
+      method: 'POST', timeout: 5000,
+      headers: { 'Content-Type': 'application/json',
+        'X-Worker-Token': cfg.token },
+    }, res => { res.resume(); res.on('end', () => resolve(true)); });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
+    req.end('{}');
+  }).then(async asked => {
+    if (!asked) return false;
+    const until = Date.now() + (waitMs || 15000);
+    while (Date.now() < until) {
+      await new Promise(r => setTimeout(r, 500));
+      const now = await portState(cfg, 1500, root);
+      if (now === 'silent' || now === 'ours') return true;
+    }
+    return false;
   });
 }
 
@@ -187,7 +350,9 @@ function updateStatus(feed, outcome, detail) {
 }
 
 module.exports = {
-  appRoot, pythonPath, readConfig, portState,
+  appRoot, dataDir, pythonPath, readConfig, portState,
+  instanceId, askSiblingToStop,
+  findPython, setupState,
   readLauncherOutput, strangerOnPort, shouldStopHelper, setupNeeded,
   updateFeed, updateStatus,
 };

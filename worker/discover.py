@@ -17,8 +17,10 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import paths                      # noqa: E402
 SELECTORS_PATH = HERE / "selectors.json"
-PROFILE_DIR = HERE / "profile"
+PROFILE_DIR = paths.data_dir() / "profile"
 
 REPORTS = {
     "fees-preview": "https://sellercentral.amazon.com/cepreport",

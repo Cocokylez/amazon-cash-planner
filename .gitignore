@@ -57,3 +57,11 @@ Thumbs.db
 # Old snapshots of this project. Git history replaces these, and one of
 # them carries a worker token from a previous installation.
 backup/
+
+# Supabase credentials for the mirror. Pasted per installation, never
+# shipped and never committed.
+worker/supabase.json
+
+# A separate data folder for development, so the dev copy never shares
+# the installed app's database or Amazon session.
+worker/devdata/

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import uuid
@@ -26,12 +27,29 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 APP = HERE.parent
-VENV = HERE / "venv"
-CONFIG = HERE / "config.json"
+
+# The environment and the token belong to this computer, not to this version
+# of the app, so they are built outside the folder an installer replaces. An
+# update used to delete both, and setup had to be run again for no reason
+# other than a version number changing.
+sys.path.insert(0, str(HERE))
+import paths                                              # noqa: E402
+
+DATA = paths.data_dir()
+paths.adopt(HERE)          # move anything an older installation left behind
+
+VENV = DATA / "venv"
+CONFIG = DATA / "config.json"
 IS_WIN = os.name == "nt"
 
 
 def venv_python() -> Path:
+    """Where this setup BUILDS the environment - always the data folder.
+
+    Deliberately not paths.venv_python(), which finds an existing one
+    anywhere: setup is the thing that decides where a new one goes, and it
+    must not start writing into an old location just because one is there.
+    """
     return VENV / ("Scripts/python.exe" if IS_WIN else "bin/python")
 
 
@@ -47,14 +65,37 @@ def run(cmd: list[str], **kw) -> None:
 def main() -> None:
     print("\n  Amazon data helper — one-time setup")
     print("  " + "-" * 46)
-    print("  Everything installs under: %s" % HERE)
+    print("  Program files:  %s" % HERE)
+    print("  Your data:      %s" % DATA)
+    print("  (your data is kept out of the program folder so updates")
+    print("   cannot delete it)")
 
     # 1 ── an isolated environment, so nothing touches your system Python
     step(1, "Creating an isolated Python environment")
-    if not venv_python().exists():
-        run([sys.executable, "-m", "venv", str(VENV)])
-    else:
+
+    # A python.exe on its own is NOT a usable environment. An interrupted
+    # install leaves the executable behind without pyvenv.cfg, and then every
+    # pip command dies with "No pyvenv.cfg file" - which reads as a broken
+    # Python installation rather than as a half-made folder. Checking only for
+    # the executable is what let that happen: setup said "reusing it" and then
+    # failed on the next line.
+    usable = venv_python().exists() and (VENV / "pyvenv.cfg").is_file()
+
+    if usable:
         print("      already there, reusing it")
+    else:
+        if VENV.exists():
+            print("      the one here is incomplete; building it again")
+            shutil.rmtree(VENV, ignore_errors=True)
+        run([sys.executable, "-m", "venv", str(VENV)])
+        if not (VENV / "pyvenv.cfg").is_file():
+            raise SystemExit(
+                "\n  The Python environment could not be created in"
+                "\n  %s"
+                "\n"
+                "\n  This is usually a folder permission problem or antivirus"
+                "\n  removing files as they are written. Nothing else was"
+                "\n  changed.\n" % VENV)
 
     # 2 ── dependencies
     step(2, "Installing Playwright")

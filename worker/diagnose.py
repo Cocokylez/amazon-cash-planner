@@ -19,6 +19,8 @@ from datetime import datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import paths                      # noqa: E402
 OUT = HERE / "diagnostic-report.txt"
 
 lines: list[str] = []
@@ -44,7 +46,7 @@ def section(name: str) -> None:
 
 def config() -> dict:
     try:
-        return json.loads((HERE / "config.json").read_text("utf-8"))
+        return json.loads((paths.data_dir() / "config.json").read_text("utf-8"))
     except Exception:
         return {}
 
@@ -128,7 +130,7 @@ w("config.json   : %s" % ("present" if cfg else "MISSING or unreadable"))
 w("  port        : %s" % cfg.get("port", "(not set, defaults to 8765)"))
 w("  token       : %s" % ("set, not shown" if cfg.get("token") else "NOT SET"))
 try:
-    st = json.loads((HERE / "settings.json").read_text("utf-8"))
+    st = json.loads((paths.data_dir() / "settings.json").read_text("utf-8"))
     w("settings.json : marketplaces=%s accountType=%s"
       % (st.get("marketplaces"), st.get("accountType")))
 except Exception:
@@ -143,7 +145,7 @@ except Exception:
     w("report setup  : none recorded yet")
 
 w("profile dir   : %s" % ("present (your Amazon session; contents not read)"
-                          if (HERE / "profile").exists() else "not created yet"))
+                          if (paths.data_dir() / "profile").exists() else "not created yet"))
 
 section("Is the helper running?")
 port = int(cfg.get("port") or 8765)
@@ -174,7 +176,7 @@ startup = (Path(os.environ.get("APPDATA", ""))
 w("autostart     : %s" % ("registered" if startup.exists() else "not registered"))
 
 section("Last 60 log lines (already sanitised by the helper)")
-log = HERE / "logs" / "helper.log"
+log = paths.data_dir() / "logs" / "helper.log"
 if log.exists():
     try:
         tail = log.read_text("utf-8", errors="replace").splitlines()[-60:]

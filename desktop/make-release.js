@@ -41,6 +41,11 @@ if (!installer) {
    installed app reaches for and cannot invent. */
 const REQUIRED = [
   'worker/requirements.txt',   // install.py pip-installs from it
+  // worker.py imports this at start-up. Without it the helper does not run
+  // at all, so its absence has to be caught here rather than by someone
+  // opening the app.
+  'worker/paths.py',
+  'worker/supabase.py',
   'worker/install.py',
   'worker/launch.py',
   'worker/worker.py',
@@ -49,7 +54,8 @@ const REQUIRED = [
   'worker/seller_central.py',
   'worker/SETUP.cmd',
   'worker/DIAGNOSE.cmd',
-  'worker/open-app.cmd',
+  'worker/open-app.cmd',       // the desktop shortcut AND the autostart entry
+  'worker/start-helper.cmd',
   'app.html',
   'lib/app.js',
   'lib/money.js',

@@ -5,7 +5,7 @@
   },
   "name": "amazon-cash-planner",
   "productName": "Amazon Cash Planner",
-  "version": "4.8.0",
+  "version": "4.9.6",
   "description": "Plans Amazon FBA cash flow from reports downloaded on this computer.",
   "private": true,
   "main": "desktop/main.js",
@@ -14,7 +14,8 @@
     "desktop:pack": "electron-builder --dir",
     "desktop:build": "electron-builder --win nsis",
     "test": "node test/run.js",
-    "desktop:release": "node desktop/make-release.js"
+    "desktop:release": "node desktop/make-release.js",
+    "desktop:publish": "node desktop/publish.js"
   },
   "build": {
     "appId": "com.local.amazon-cash-planner",
@@ -48,7 +49,9 @@
           "!diagnostic-report.txt",
           "!test_*.py",
           "!testdata/**",
-          "!.gitignore"
+          "!.gitignore",
+          "!supabase.json",
+          "!devdata/**"
         ]
       },
       {

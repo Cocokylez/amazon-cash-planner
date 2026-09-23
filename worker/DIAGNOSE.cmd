@@ -15,7 +15,11 @@ echo   helper token are NOT included.
 echo.
 
 set "PY="
-if exist "venv\Scripts\python.exe" set "PY=venv\Scripts\python.exe"
+rem  Same order as worker\paths.py: the data folder first, then beside
+rem  the code. Looking only beside the code meant DIAGNOSE could not find
+rem  the very environment it was meant to report on.
+if exist "%LOCALAPPDATA%\Amazon Cash Plannerenv\Scripts\python.exe" set "PY=%LOCALAPPDATA%\Amazon Cash Plannerenv\Scripts\python.exe"
+if not defined PY if exist "venv\Scripts\python.exe" set "PY=venv\Scripts\python.exe"
 if not defined PY (
   where py >nul 2>&1 && set "PY=py -3"
 )

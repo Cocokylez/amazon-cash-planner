@@ -12,7 +12,7 @@ echo   This installs a small helper on THIS computer so the app
 echo   can download your Seller Central reports.
 echo.
 echo   Nothing is purchased. No account is created. Everything
-echo   stays in this folder.
+echo   stays on this computer.
 echo.
 
 cd /d "%~dp0"

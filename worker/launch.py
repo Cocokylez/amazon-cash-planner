@@ -13,11 +13,18 @@ import webbrowser
 
 HERE = Path(__file__).resolve().parent
 
+sys.path.insert(0, str(HERE))
+import paths                                              # noqa: E402
+
+# Config and logs live with the rest of this computer's things, so an update
+# cannot take the access token with it.
+DATA = paths.data_dir()
+
 def instance_id():
     return hashlib.sha256(str(HERE).lower().encode()).hexdigest()[:20]
 
 def config():
-    cfg = json.loads((HERE / 'config.json').read_text('utf-8'))
+    cfg = json.loads((DATA / 'config.json').read_text('utf-8'))
     if not cfg.get('token') or not 1024 <= int(cfg.get('port', 8765)) <= 65535:
         raise RuntimeError('Invalid config.json. Keep the existing token; set port to 1024..65535.')
     return cfg
@@ -77,9 +84,16 @@ def main():
         subprocess.check_call([sys.executable, str(HERE / 'make_shortcut.py')], cwd=HERE)
         current = None
     if not current:
-        py = HERE / ('venv/Scripts/python.exe' if os.name == 'nt' else 'venv/bin/python')
-        if not py.exists(): raise RuntimeError('Python environment is missing. Run SETUP.cmd.')
-        logs = HERE / 'logs'
+        # Asked of paths.py, which is the one place that knows. Looking here
+        # by hand is what produced a loop with no exit: setup built the
+        # environment in the data folder, this line looked beside the code,
+        # and the answer was always "run SETUP" - which had already worked.
+        py = paths.venv_python(HERE)
+        if py is None:
+            raise RuntimeError(
+                'The Python environment is missing. Run SETUP.cmd once. '
+                '(Looked in %s and %s.)' % (DATA / 'venv', HERE / 'venv'))
+        logs = DATA / 'logs'
         logs.mkdir(exist_ok=True)
         with (logs / 'startup.log').open('a', encoding='utf-8') as out:
             child = subprocess.Popen([str(py), '-u', str(Path(__file__).resolve()), '--serve'],
@@ -104,7 +118,7 @@ if __name__ == '__main__':
         # Do not print external exception bodies, which can contain credentials.
         message = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__ + ': run SETUP.cmd or DIAGNOSE.cmd.'
         print('ERROR: ' + message)
-        (HERE / 'logs').mkdir(exist_ok=True)
-        with (HERE / 'logs/launcher.log').open('a', encoding='utf-8') as log:
+        (DATA / 'logs').mkdir(exist_ok=True)
+        with (DATA / 'logs/launcher.log').open('a', encoding='utf-8') as log:
             log.write(time.strftime('%Y-%m-%d %H:%M:%S ') + message + '\n')
         sys.exit(1)

@@ -41,6 +41,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 import archive                  # local; stdlib only, so not deferred
+import paths                    # where this computer keeps its own things
 
 # Windows consoles default to a legacy codepage, which turns any non-ASCII
 # character in a message into a "?" — exactly the messages people are asked
@@ -53,24 +54,33 @@ except Exception:
 
 HERE = Path(__file__).resolve().parent
 APP_DIR = HERE.parent
-PROFILE_DIR = HERE / "profile"
+# Everything below belongs to this COMPUTER, not to this version of the app,
+# so none of it lives in the folder an installer replaces. See paths.py.
+DATA = paths.data_dir()
+
+# Anything left beside the code by an older installation is moved across once.
+# Never overwriting: if the new place already has it, the old copy is left
+# where it is rather than replacing something possibly newer.
+ADOPTED = paths.adopt(HERE)
+
+PROFILE_DIR = DATA / "profile"
 MAX_BODY = 64 << 20          # a request body this program will accept
 
 
-DOWNLOAD_DIR = HERE / "downloads"
+DOWNLOAD_DIR = DATA / "downloads"
 # Every report ever downloaded, in one file that outlives the CSV and
 # the browser that imported it. See archive.py for why it exists.
-ARCHIVE_DB = HERE / "reports.db"
+ARCHIVE_DB = DATA / "reports.db"
 SELECTORS_PATH = HERE / "selectors.json"
 # The parsed dataset the local app publishes here, which the MCP bridge serves
 # to an artifact. Financial figures only — never credentials.
-DATASET_PATH = HERE / "data" / "dataset.json"
+DATASET_PATH = DATA / "dataset.json"
 
 # Bumped whenever the app needs a helper new enough to talk to. The app
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.8.0"
+HELPER_VERSION = "4.9.6"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -79,7 +89,7 @@ PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after con
 # drive the worker behind your back. install.py writes a stable one to
 # config.json so the bookmark keeps working; the environment still wins, and a
 # throwaway is generated when there is neither.
-CONFIG_PATH = HERE / "config.json"
+CONFIG_PATH = DATA / "config.json"
 
 
 def _config() -> dict:
@@ -111,7 +121,7 @@ STATUSES = [
 ]
 
 
-LOG_DIR = HERE / "logs"
+LOG_DIR = DATA / "logs"
 LOG_PATH = LOG_DIR / "helper.log"
 
 
@@ -189,7 +199,7 @@ class JobStore:
         self._lock = threading.Lock()
         self._jobs: dict[str, dict] = {}
         self._order: list[str] = []
-        self.path = HERE / 'jobs.json'
+        self.path = DATA / 'jobs.json'
         if self.path.exists():
             rows = json.loads(self.path.read_text('utf-8'))
             for job in rows:
@@ -298,7 +308,7 @@ class JobStore:
 JOBS = JobStore()
 SETUP: dict = {"session": None}
 
-SETTINGS_PATH = HERE / "settings.json"
+SETTINGS_PATH = DATA / "settings.json"
 DEFAULT_SETTINGS = {
     # Amazon's own names, as they appear in the marketplace switcher.
     "marketplaces": ["United States"],
@@ -1295,9 +1305,13 @@ def main() -> None:
         raise SystemExit(
             "\n  The helper could not open port %d.\n"
             "\n  %s\n"
-            "\n  Edit config.json in this folder and change \"port\" to a\n"
-            "  different number (for example 8766), then try again.\n"
-            % (PORT, exc))
+            # The file, by its full path. It no longer sits beside the
+            # program - it moved out so updates could not delete it - so
+            # "in this folder" would send someone to the wrong place.
+            "\n  Edit this file and change \"port\" to a different number\n"
+            "  (for example 8766), then try again:\n"
+            "      %s\n"
+            % (PORT, exc, CONFIG_PATH))
     url = "http://%s:%d/?token=%s" % (HOST, PORT, TOKEN)
     print("")
     print("  Amazon cash planner — local worker")
