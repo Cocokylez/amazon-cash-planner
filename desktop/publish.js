@@ -55,23 +55,63 @@ const digest = sha512Base64(path.join(OUT, asset));
 
 console.log('  ' + asset + '  ' + size + ' bytes');
 
-/* The release first, so the assets have somewhere to go. */
+/* Everything that must go up, confirmed present BEFORE a release exists.
+   An empty release is not a harmless half-finished job: GitHub makes it the
+   latest one, every installed copy then asks it for latest.yml, and the
+   answer is 404. The app stops being able to update at all - which is the
+   one failure that cannot be fixed by shipping a fix. */
+const wanted = [asset, built + '.blockmap'].filter(f =>
+  fs.existsSync(path.join(OUT, f)));
+if (!wanted.includes(asset)) {
+  console.error('\n  ' + asset + ' is missing from dist-desktop. Nothing was '
+    + 'published.\n  (Two builds sharing this folder will do that: one\'s '
+    + 'rm -rf lands in the middle of the other\'s upload.)\n');
+  process.exit(1);
+}
+
+/* The release, and whether THIS run is what created it - because only then
+   is it ours to remove when something later fails. */
+let createdHere = false;
 try {
   gh('release', 'view', TAG, '--repo', REPO);
   console.log('  release ' + TAG + ' already exists; reusing it');
 } catch (e) {
   gh('release', 'create', TAG, '--repo', REPO, '--title', pkg.version,
     '--notes', 'Amazon Cash Planner ' + pkg.version);
+  createdHere = true;
   console.log('  created release ' + TAG);
 }
 
-for (const f of [asset, built + '.blockmap']) {
-  const full = path.join(OUT, f);
-  if (!fs.existsSync(full)) continue;
-  const named = f.replace(/ /g, '-');
-  if (named !== f) fs.copyFileSync(full, path.join(OUT, named));
-  gh('release', 'upload', TAG, path.join(OUT, named), '--repo', REPO, '--clobber');
-  console.log('  uploaded ' + named);
+/* From here on a failure must not leave a release standing. */
+function abandon(why) {
+  console.error('\n  ' + why);
+  if (createdHere) {
+    try {
+      gh('release', 'delete', TAG, '--repo', REPO, '--yes', '--cleanup-tag');
+      console.error('  removed the empty release ' + TAG
+        + ' so it cannot become the latest one.');
+    } catch (e2) {
+      console.error('  COULD NOT remove ' + TAG + ': ' + e2.message
+        + '\n  Delete it by hand - while it exists and is empty, no '
+        + 'installed copy can update.');
+    }
+  } else {
+    console.error('  ' + TAG + ' already existed, so it was left alone. '
+      + 'Check its assets by hand.');
+  }
+  process.exit(1);
+}
+
+try {
+  for (const f of wanted) {
+    const named = f.replace(/ /g, '-');
+    if (named !== f) fs.copyFileSync(path.join(OUT, f), path.join(OUT, named));
+    gh('release', 'upload', TAG, path.join(OUT, named), '--repo', REPO,
+      '--clobber');
+    console.log('  uploaded ' + named);
+  }
+} catch (e) {
+  abandon('Uploading the installer failed: ' + e.message);
 }
 
 const when = JSON.parse(gh('release', 'view', TAG, '--repo', REPO,
@@ -90,8 +130,28 @@ const latest = [
 ].join('\n');
 
 fs.writeFileSync(path.join(OUT, 'latest.yml'), latest);
-gh('release', 'upload', TAG, path.join(OUT, 'latest.yml'), '--repo', REPO, '--clobber');
+try {
+  gh('release', 'upload', TAG, path.join(OUT, 'latest.yml'), '--repo', REPO,
+    '--clobber');
+} catch (e) {
+  abandon('Uploading latest.yml failed: ' + e.message);
+}
 console.log('  uploaded latest.yml');
+
+/* Asked of GitHub, not assumed from the fact that no call threw. A release
+   without latest.yml is the exact shape that breaks every updater, so it is
+   worth one more request to be certain it is not what we just made. */
+{
+  const names = JSON.parse(gh('release', 'view', TAG, '--repo', REPO,
+    '--json', 'assets')).assets.map(a => a.name);
+  for (const need of ['latest.yml', asset]) {
+    if (!names.includes(need)) {
+      abandon('The release is missing ' + need + ' after uploading it. '
+        + 'GitHub lists: ' + (names.join(', ') || '(nothing)'));
+    }
+  }
+  console.log('  release carries: ' + names.join(', '));
+}
 
 /* Checked against what GitHub serves, not what is on this disk. A wrong hash
    here would show up as an update that fails for reasons nobody could guess. */

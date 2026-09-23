@@ -480,5 +480,41 @@ const H = require('../desktop/helper.js');
     await new Promise(r => stubborn.close(r));
   }
 
+  /* The update bar.
+
+     An update used to download, sit ready, and never get installed, because
+     the only thing that said so was inside a collapsed panel below the
+     mirror. These check the notice is somewhere it will actually be seen -
+     not that it looks a particular way, but that it is not buried again. */
+  {
+    const fs2 = require('fs');
+    const pj = (...a) => require('path').join(__dirname, '..', ...a);
+    const html = fs2.readFileSync(pj('app.html'), 'utf8');
+    const appjs = fs2.readFileSync(pj('lib', 'app.js'), 'utf8');
+
+    T.ok('the page has a slot for the update notice',
+      html.includes('id="updatebar"'));
+    T.ok('and it sits above the header, not inside a panel',
+      html.indexOf('id="updatebar"') < html.indexOf('<header id="top"'));
+    T.ok('an empty slot takes up no room',
+      html.includes('#updatebar:empty { display: none; }'));
+
+    T.ok('something fills it on every render',
+      /\$\('#updatebar'\)/.test(appjs));
+    T.ok('a downloaded update offers to install itself',
+      /u\.ready[\s\S]{0,600}data-installupdate/.test(appjs));
+    T.ok('and names the version that is waiting',
+      /u\.ready[\s\S]{0,400}readyVersion/.test(appjs));
+
+    /* Being up to date is not news. A bar that is always there is furniture,
+       and furniture does not get read. */
+    const bar = appjs.slice(appjs.indexOf('function updateBar()'),
+      appjs.indexOf('function render()'));
+    T.ok('being up to date shows nothing', !/'current'/.test(bar));
+    T.ok('and a quiet check shows nothing', !/'checking'/.test(bar));
+    T.ok('only ready and downloading are loud',
+      /u\.ready/.test(bar) && /'available'/.test(bar));
+  }
+
   T.report();
 })();

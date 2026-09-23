@@ -210,6 +210,23 @@ tbody tr:hover td.act { background: var(--accent-soft); }
 .expander[aria-expanded="true"] .ic { transform: rotate(90deg); }
 
 /* ── global reporting range ────────────────────────────────────────────── */
+/* The update bar. Loud enough to be seen on the way past, quiet enough not
+   to be the thing you look at first every single time. */
+#updatebar:empty { display: none; }
+.updbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 12px 16px; background: var(--ok-bg, #e7f5ef);
+  border-bottom: 1px solid var(--ok-line, #bfe3d3); color: var(--ok-ink, #14543c);
+  font-size: var(--t-label); }
+.updbar.is-working { background: var(--warn-bg, #fdf3e0);
+  border-bottom-color: var(--warn-line, #f0d9ab); color: var(--warn-ink, #6b4c12); }
+.updbar b { font-weight: 650; }
+.updbar .grow { flex: 1 1 auto; }
+.updbar .btn { margin: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .updbar.is-ready { animation: updin .35s ease-out; }
+}
+@keyframes updin { from { opacity: 0; transform: translateY(-6px); } }
+
 .rangebar { background: var(--surface); border: 1px solid var(--line);
             border-radius: var(--r-card); padding: 14px var(--s3); margin-bottom: var(--s3);
             box-shadow: var(--shadow); }
@@ -428,6 +445,10 @@ details[open] > summary { margin-bottom: 10px; }
   </aside>
 
   <div id="main">
+    <!-- Above the header, so it is the first thing on every tab. An update
+         nobody notices is an update nobody installs; this used to live inside
+         a collapsed panel three screens down. -->
+    <div id="updatebar"></div>
     <header id="top">
       <div class="inner">
         <div>

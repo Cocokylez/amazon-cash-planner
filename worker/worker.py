@@ -81,7 +81,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.12"
+HELPER_VERSION = "4.9.13"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
