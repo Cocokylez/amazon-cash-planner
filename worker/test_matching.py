@@ -1397,6 +1397,72 @@ check("adopting a folder into itself changes nothing",
 check("and leaves the file alone",
       (_ps / "config.json").read_text(encoding="utf-8"), "keep me")
 
+section("The mirror's credentials")
+
+import supabase as SB                                     # noqa: E402
+import base64 as _b64                                     # noqa: E402
+
+def _jwt(role):
+    head = _b64.urlsafe_b64encode(b'{"alg":"HS256"}').decode().rstrip("=")
+    body = _b64.urlsafe_b64encode(
+        json.dumps({"role": role, "iss": "supabase"}).encode()).decode().rstrip("=")
+    return head + "." + body + "." + ("x" * 43)
+
+# Mistakes people actually make, each named before anything leaves the machine.
+check("an empty URL is caught",
+      "empty" in (SB.check_shape("", _jwt("anon")) or ""), True)
+check("a URL without https is caught",
+      "https" in (SB.check_shape("p.supabase.co", _jwt("anon")) or ""), True)
+check("the two fields swapped is recognised as such",
+      "swapped" in (SB.check_shape("https://p.supabase.co", "https://x") or ""), True)
+check("a key too short to be one is caught",
+      "too short" in (SB.check_shape("https://p.supabase.co", "abc") or ""), True)
+
+# The one that matters. service_role ignores every access rule in the project,
+# so pasting it here would hand full read and write to anything holding it.
+_refusal = SB.check_shape("https://p.supabase.co", _jwt("service_role"))
+check("a service_role key is refused", "service_role" in (_refusal or ""), True)
+check("and the right one is named", "anon key" in (_refusal or ""), True)
+check("an anon key is accepted",
+      SB.check_shape("https://p.supabase.co", _jwt("anon")), None)
+
+
+section("Nothing is saved that has not actually connected")
+
+_mh = Path(_t3.mkdtemp())
+check("an unconfigured install says so", SB.load(_mh)["configured"], False)
+
+# A real attempt at a project that does not exist. This is the only thing that
+# can prove a connection - a plausible URL proves nothing at all.
+_dead = SB.test("https://this-project-does-not-exist-9x7.supabase.co", _jwt("anon"))
+check("an unreachable project is not a connection", _dead["ok"], False)
+check("and says nothing was sent",
+      "Nothing was saved or sent" in _dead["detail"], True)
+
+# Saved settings never hand the key back.
+SB.save(_mh, "https://p.supabase.co", _jwt("anon"),
+        {"ok": True, "detail": "pretend"})
+_loaded = SB.load(_mh)
+check("the settings are stored", _loaded["configured"], True)
+check("the key itself never comes back out",
+      _jwt("anon") in json.dumps(_loaded), False)
+check("only enough of it to recognise which one",
+      "\u2026" in _loaded["keyHint"], True)
+check("and what the last check found is kept",
+      _loaded["lastResult"]["ok"], True)
+
+check("forgetting removes them", SB.forget(_mh), True)
+check("and it reads as unconfigured again", SB.load(_mh)["configured"], False)
+check("forgetting twice is not an error", SB.forget(_mh), False)
+
+# The schema locks the tables by default: an open table holding somebody's fee
+# data is not a state to pass through on the way to getting policies right.
+check("row level security is on in the schema",
+      SB.SCHEMA_SQL.count("enable row level security"), 2)
+check("and money is scaled integers, not floats",
+      "net_sales_scaled  bigint" in SB.SCHEMA_SQL, True)
+
+
 print("passed %d   failed %d" % (PASS, FAIL))
 if FAILURES:
     print("\nFAILURES")

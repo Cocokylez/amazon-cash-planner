@@ -41,6 +41,7 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 import archive                  # local; stdlib only, so not deferred
+import supabase                 # the mirror's settings and its test
 import paths                    # where this computer keeps its own things
 
 # Windows consoles default to a legacy codepage, which turns any non-ASCII
@@ -80,7 +81,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.6"
+HELPER_VERSION = "4.9.7"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -803,6 +804,13 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/state/history":
                 return self._json({"revisions": archive.state_history(ARCHIVE_DB)})
 
+            # The mirror's settings. The key itself never comes back out -
+            # only enough of it to recognise which one is in use.
+            if path == "/api/supabase":
+                out = supabase.load(DATA)
+                out["schemaSql"] = supabase.SCHEMA_SQL
+                return self._json(out)
+
             if path == "/api/jobs":
                 return self._json({"jobs": JOBS.list()})
 
@@ -1112,6 +1120,37 @@ class Handler(BaseHTTPRequestHandler):
             if not job.get("reused"):
                 WORK_QUEUE.put(job["jobId"])
             return self._json(job, 201)
+
+        if parsed.path == "/api/supabase/test":
+            # A REAL request. Saying "connected" because a URL looks plausible
+            # would be the worst possible lie here: it is the one claim that
+            # decides whether somebody trusts their figures are anywhere else.
+            return self._json(supabase.test(payload.get("url") or "",
+                                            payload.get("key") or ""))
+
+        if parsed.path == "/api/supabase":
+            url = (payload.get("url") or "").strip()
+            key = (payload.get("key") or "").strip()
+
+            # Tested BEFORE it is saved. Storing credentials that have never
+            # worked would leave the app claiming to be configured while
+            # nothing it does can succeed.
+            result = supabase.test(url, key)
+            if not result.get("ok"):
+                return self._json({"error": result.get("detail"),
+                                   "saved": False}, 400)
+
+            saved = supabase.save(DATA, url, key, result)
+            saved["testedJustNow"] = True
+            return self._json(saved)
+
+        if parsed.path == "/api/supabase/forget":
+            gone = supabase.forget(DATA)
+            return self._json({"forgotten": gone, "configured": False,
+                               "note": "The credentials are removed from this "
+                                       "computer. Anything already mirrored is "
+                                       "untouched - delete that in Supabase if "
+                                       "you want it gone."})
 
         if parsed.path == "/api/state":
             body = payload.get("body")
