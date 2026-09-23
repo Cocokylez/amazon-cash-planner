@@ -324,6 +324,19 @@ const H = require('../desktop/helper.js');
     }
   }
 
+  {
+    /* The check used to happen once, at launch - so an app left open, which
+       is the whole point of it, would never see a release published an hour
+       later. "I waited" met with nothing happening, because nothing was. */
+    const src = fs.readFileSync(path.join(__dirname, '..', 'desktop', 'main.js'), 'utf8');
+    T.ok('the app keeps asking while it is open',
+      /setInterval\([\s\S]{0,200}checkForUpdates/.test(src));
+    T.ok('and the repeat is started once the app is up',
+      src.includes('keepCheckingForUpdates()'));
+    T.ok('without keeping the app alive on its own',
+      /recheckTimer\.unref/.test(src));
+  }
+
   T.section('One version number, kept in three files by hand');
 
   {

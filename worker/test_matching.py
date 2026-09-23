@@ -1418,6 +1418,64 @@ check("the two fields swapped is recognised as such",
 check("a key too short to be one is caught",
       "too short" in (SB.check_shape("https://p.supabase.co", "abc") or ""), True)
 
+# The dashboard address instead of the project's. The single easiest paste to
+# get wrong, because the page you copy from IS the dashboard - so the fix is
+# not "that is invalid", it is handing back the URL they actually wanted.
+_dash = SB.check_shape(
+    "https://supabase.com/dashboard/project/tsdkvlyhcxqbdtsitlmn", _jwt("anon"))
+check("the dashboard address is recognised as such",
+      "dashboard" in (_dash or ""), True)
+check("and the real project URL is handed back, not described",
+      "https://tsdkvlyhcxqbdtsitlmn.supabase.co" in (_dash or ""), True)
+check("a deeper dashboard link is caught the same way",
+      "https://abcdefghijklmnop.supabase.co" in (SB.check_shape(
+          "https://supabase.com/dashboard/project/abcdefghijklmnop/settings/api",
+          _jwt("anon")) or ""), True)
+check("the bare Supabase website is caught too",
+      "not your project" in (SB.check_shape("https://supabase.com",
+                                            _jwt("anon")) or ""), True)
+check("and a real project URL still passes",
+      SB.check_shape("https://tsdkvlyhcxqbdtsitlmn.supabase.co", _jwt("anon")),
+      None)
+
+
+section("A 200 is not a connection")
+
+# This one shipped. Pasting the dashboard address got status 200, text/html
+# and "server: Vercel" - Supabase's own marketing site - and the app reported
+# "The project answered. This is a real connection, not a saved setting."
+# It was a web page. A status code is not evidence of what answered.
+class _Reply:
+    def __init__(self, **h): self.headers = h
+    def get(self, k, d=None): return self.headers.get(k, d)
+
+def _reply(**h):
+    r = _Reply(**h)
+    r.headers = type("H", (), {"get": lambda _s, k, d=None:
+                               h.get(k.lower().replace("-", "_"), d)})()
+    return r
+
+_page = _reply(server="Vercel", content_type="text/html; charset=utf-8")
+_why = SB._not_a_database(_page, "<!DOCTYPE html><html>")
+check("an HTML page is not a database", bool(_why), True)
+check("and it says so plainly", "web page" in (_why or ""), True)
+check("and states nothing was connected",
+      "Nothing was connected" in (_why or ""), True)
+
+check("PostgREST naming itself is accepted",
+      SB._not_a_database(_reply(server="postgrest/12.2.0",
+                                content_type="application/openapi+json"),
+                         '{"swagger":"2.0"'), None)
+check("a JSON reply is accepted",
+      SB._not_a_database(_reply(server="cloudflare",
+                                content_type="application/json;charset=UTF-8"),
+                         '{"paths":{}}'), None)
+check("HTML with no content type is still caught by its body",
+      bool(SB._not_a_database(_reply(server="nginx"), "  <html>")), True)
+check("and anything else is named rather than assumed",
+      "no content type" in (SB._not_a_database(_reply(server="nginx"), "hi")
+                            or ""), True)
+
 # The one that matters. service_role ignores every access rule in the project,
 # so pasting it here would hand full read and write to anything holding it.
 _refusal = SB.check_shape("https://p.supabase.co", _jwt("service_role"))
@@ -1425,6 +1483,18 @@ check("a service_role key is refused", "service_role" in (_refusal or ""), True)
 check("and the right one is named", "anon key" in (_refusal or ""), True)
 check("an anon key is accepted",
       SB.check_shape("https://p.supabase.co", _jwt("anon")), None)
+
+# Supabase has issued keys in two shapes. Older projects hand out JWTs with
+# the role in the payload; newer ones hand out sb_publishable_... and
+# sb_secret_..., which are not JWTs at all - so decoding was the only check
+# and a modern secret key went straight through it.
+check("a new-style publishable key is accepted",
+      SB.check_shape("https://p.supabase.co", "sb_publishable_" + "a" * 30),
+      None)
+_newsecret = SB.check_shape("https://p.supabase.co", "sb_secret_" + "a" * 30)
+check("a new-style secret key is refused", _newsecret is not None, True)
+check("and it names the one to use instead",
+      "sb_publishable_" in (_newsecret or ""), True)
 
 
 section("Nothing is saved that has not actually connected")
@@ -1461,6 +1531,172 @@ check("row level security is on in the schema",
       SB.SCHEMA_SQL.count("enable row level security"), 2)
 check("and money is scaled integers, not floats",
       "net_sales_scaled  bigint" in SB.SCHEMA_SQL, True)
+
+
+section("The push: what actually crosses the wire")
+
+import archive as AR                                       # noqa: E402
+import threading as _th                                    # noqa: E402
+from http.server import BaseHTTPRequestHandler, HTTPServer  # noqa: E402
+
+# Every column the push sends has to exist in the SQL the user is told to run.
+# These two drifted apart once already; a set difference catches it in a second
+# rather than as a "column does not exist" error mid-upload.
+def _schema_cols(table):
+    body = SB.SCHEMA_SQL.split("create table if not exists " + table + " (")[1]
+    body = body.split(");")[0]
+    out = set()
+    for line in body.split("\n"):
+        line = line.strip()
+        if line and not line.startswith("--"):
+            out.add(line.split()[0])
+    return out
+
+check("every reports column sent exists in the schema",
+      set(SB._report_payload({})) - _schema_cols("reports"), set())
+check("every report_rows column sent exists in the schema",
+      set(SB._row_payload({})) - _schema_cols("report_rows"), set())
+
+
+class _Fake(BaseHTTPRequestHandler):
+    """Stands in for PostgREST. Records what it was actually sent."""
+    seen = []
+    fail_on = None
+    fail_body = b'{"code":"42501","message":"new row violates row-level security policy"}'
+
+    def do_POST(self):
+        n = int(self.headers.get("content-length") or 0)
+        raw = self.rfile.read(n)
+        table = self.path.rsplit("/", 1)[-1]
+        _Fake.seen.append({
+            "table": table,
+            "prefer": self.headers.get("Prefer") or "",
+            "apikey": self.headers.get("apikey") or "",
+            "rows": json.loads(raw.decode("utf-8")),
+        })
+        if _Fake.fail_on == table:
+            self.send_response(403)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(_Fake.fail_body)))
+            self.end_headers()
+            self.wfile.write(_Fake.fail_body)
+            return
+        self.send_response(201)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *a):
+        pass
+
+
+_srv = HTTPServer(("127.0.0.1", 0), _Fake)
+_th.Thread(target=_srv.serve_forever, daemon=True).start()
+_base = "http://127.0.0.1:%d" % _srv.server_address[1]
+
+# A real archive with a real report in it.
+_ph = Path(_t3.mkdtemp())
+_pdb = _ph / "reports.db"
+_rid = AR.record_report(_pdb, {
+    "jobId": "j1", "reportType": "sku-economics", "marketplace": "US",
+    "dateRange": "2026-09-01..2026-09-30",
+    "periodStart": "2026-09-01", "periodEnd": "2026-09-30",
+    "fileName": "x.csv"}, content_hash="h1", money_scale=10)
+check("a report was recorded", bool(_rid), True)
+AR.record_rows(_pdb, _rid, [
+    {"msku": "SKU-1", "marketplace": "US", "periodStart": "2026-09-01",
+     "periodEnd": "2026-09-30", "currency": "USD", "unitsSold": 3,
+     "netSales": {"$dec": "95514733333297"}, "sourceLine": 1},
+    {"msku": "SKU-2", "marketplace": "US", "periodStart": "2026-09-01",
+     "periodEnd": "2026-09-30", "currency": "USD", "unitsSold": 5,
+     "netSales": {"$dec": "-4200000000000"}, "sourceLine": 2},
+], money_scale=10)
+
+# Credentials pointing at the stand-in, written the way the app writes them.
+(_ph / "supabase.json").write_text(json.dumps({
+    "url": _base, "key": "sb_publishable_" + "x" * 30,
+    "writeKey": "sb_secret_" + "y" * 30}), encoding="utf-8")
+
+_Fake.seen = []
+_res = SB.push(_ph, _pdb, archive=AR)
+check("the push reports success", _res["ok"], True)
+check("one report went", _res["reports"], 1)
+check("both rows went", _res["rows"], 2)
+
+_tables = [c["table"] for c in _Fake.seen]
+check("the report is sent before its rows", _tables, ["reports", "report_rows"])
+check("it is sent as an upsert, so a repeat corrects rather than fails",
+      "merge-duplicates" in _Fake.seen[0]["prefer"], True)
+check("and authenticated with the WRITE key, not the publishable one",
+      _Fake.seen[0]["apikey"].startswith("sb_secret_"), True)
+
+_sent = _Fake.seen[1]["rows"]
+# The whole point of the scaled integers: 9551.4733333297 must arrive as
+# 95514733333297 and not as a float that is nearly that.
+check("exact money crosses as an integer",
+      _sent[0]["net_sales_scaled"], 95514733333297)
+check("its type is int, never float",
+      isinstance(_sent[0]["net_sales_scaled"], int), True)
+check("a negative stays exact", _sent[1]["net_sales_scaled"], -4200000000000)
+check("the verbatim row travels as JSON, not as a quoted string",
+      isinstance(_sent[0]["raw"], dict), True)
+check("an empty date becomes null rather than ''",
+      SB._date(""), None)
+
+# Sending twice must not re-send. Without this every push grows forever.
+_Fake.seen = []
+_again = SB.push(_ph, _pdb, archive=AR)
+check("a second push sends nothing", _again["reports"], 0)
+check("and nothing crossed the wire at all", len(_Fake.seen), 0)
+check("and it says so rather than claiming work", "already has" in _again["detail"], True)
+
+# A refusal partway through is a failure, carrying what did land.
+_Fake.fail_on = "report_rows"
+_rid2 = AR.record_report(_pdb, {
+    "jobId": "j2", "reportType": "sku-economics", "marketplace": "US",
+    "periodStart": "2026-10-01", "periodEnd": "2026-10-31",
+    "fileName": "y.csv"}, content_hash="h2", money_scale=10)
+AR.record_rows(_pdb, _rid2, [
+    {"msku": "SKU-9", "marketplace": "US", "periodStart": "2026-10-01",
+     "periodEnd": "2026-10-31", "unitsSold": 1, "sourceLine": 1}],
+    money_scale=10)
+_bad = SB.push(_ph, _pdb, archive=AR)
+check("a refused write is not reported as success", _bad["ok"], False)
+check("Row Level Security is named, not an opaque 403",
+      "Row Level Security" in _bad["detail"], True)
+check("and it says the key is not the problem",
+      "nothing is wrong with your key" in _bad["detail"], True)
+
+# Crucially: the half-sent report is NOT marked done, so the retry is complete.
+_Fake.fail_on = None
+_Fake.seen = []
+_retry = SB.push(_ph, _pdb, archive=AR)
+check("the retry resends the whole report", _retry["ok"], True)
+check("including its rows", _retry["rows"], 1)
+check("and only the unfinished one", _retry["reports"], 1)
+
+check("a missing table names the fix",
+      "Run the setup SQL" in SB._explain_write_failure(
+          "reports", 404, 'relation "reports" does not exist'), True)
+
+# The write key is the privileged one, and the two fields refuse each other.
+check("the publishable key is refused as a write key",
+      "publishable key" in (SB.check_write_key("sb_publishable_" + "x"*30) or ""),
+      True)
+check("the secret key is accepted as a write key",
+      SB.check_write_key("sb_secret_" + "y"*30), None)
+check("the secret key is still refused in the connect field",
+      bool(SB.check_shape("https://p.supabase.co", "sb_secret_" + "y"*30)), True)
+
+_state = SB.load(_ph)
+check("the write key is never handed back",
+      "sb_secret_" + "y"*30 in json.dumps(_state), False)
+check("only that one is present", _state["canWrite"], True)
+check("and a hint of which", "\u2026" in (_state["writeKeyHint"] or ""), True)
+check("forgetting it keeps the connection",
+      SB.forget_write_key(_ph) and SB.load(_ph)["configured"], True)
+check("but stops the push", SB.push(_ph, _pdb, archive=AR)["ok"], False)
+
+_srv.shutdown()
 
 
 print("passed %d   failed %d" % (PASS, FAIL))

@@ -147,6 +147,17 @@ CREATE TABLE IF NOT EXISTS report_jobs (
 );
 CREATE INDEX IF NOT EXISTS report_jobs_job ON report_jobs (job_id);
 
+-- What has already been mirrored. Without this every push would resend every
+-- report forever, and a push that died halfway would have no way to say which
+-- half. Keyed on the report's own updated_at, so a report that changes is
+-- sent again and one that has not is skipped.
+CREATE TABLE IF NOT EXISTS mirror_pushed (
+  report_id   TEXT PRIMARY KEY REFERENCES reports(report_id) ON DELETE CASCADE,
+  updated_at  TEXT,
+  row_count   INTEGER,
+  pushed_at   TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS report_rows_key
   ON report_rows (marketplace, msku, period_start, period_end);
 CREATE INDEX IF NOT EXISTS report_rows_report ON report_rows (report_id);
@@ -539,3 +550,74 @@ def summary(path: Path) -> dict:
                 db.close()
     except Exception:
         return empty
+
+
+def pending_reports(path: Path) -> list[dict]:
+    """Reports the mirror has not got, or has an out-of-date copy of.
+
+    A report already sent, unchanged since, is not sent again - so pushing
+    twice in a row costs one query and no upload.
+    """
+    db = connect(path)
+    try:
+        rows = db.execute("""
+            SELECT r.* FROM reports r
+            LEFT JOIN mirror_pushed m ON m.report_id = r.report_id
+            WHERE m.report_id IS NULL
+               OR m.updated_at IS NOT r.updated_at
+               OR m.row_count IS NOT r.rows_stored
+            ORDER BY r.downloaded_at
+        """).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def rows_for_report(path: Path, report_id: str) -> list[dict]:
+    """Every stored row of one report, in file order."""
+    db = connect(path)
+    try:
+        rows = db.execute(
+            "SELECT * FROM report_rows WHERE report_id = ? "
+            "ORDER BY source_line, row_id", (report_id,)).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def mark_pushed(path: Path, report_id: str, updated_at, row_count) -> None:
+    """Record that the mirror now holds this exact version of this report."""
+    db = connect(path)
+    try:
+        with _LOCK:
+            db.execute(
+                "INSERT INTO mirror_pushed (report_id, updated_at, row_count, "
+                "pushed_at) VALUES (?,?,?,?) ON CONFLICT(report_id) DO UPDATE "
+                "SET updated_at=excluded.updated_at, "
+                "row_count=excluded.row_count, pushed_at=excluded.pushed_at",
+                (report_id, updated_at, row_count, _now()))
+    finally:
+        db.close()
+
+
+def mirror_status(path: Path) -> dict:
+    """How much of the archive the mirror has, without contacting it.
+
+    This says what was SENT, not what is there now - the mirror could have
+    been emptied from the Supabase side and this would not know. It is
+    described as "sent", never as "in sync".
+    """
+    db = connect(path)
+    try:
+        total = db.execute("SELECT COUNT(*) c FROM reports").fetchone()["c"]
+        sent = db.execute(
+            "SELECT COUNT(*) c FROM mirror_pushed m "
+            "JOIN reports r ON r.report_id = m.report_id "
+            "WHERE m.updated_at IS r.updated_at "
+            "  AND m.row_count IS r.rows_stored").fetchone()["c"]
+        last = db.execute(
+            "SELECT MAX(pushed_at) p FROM mirror_pushed").fetchone()["p"]
+        return {"reports": total, "sent": sent, "pending": total - sent,
+                "lastPushAt": last}
+    finally:
+        db.close()

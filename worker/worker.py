@@ -81,7 +81,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.7"
+HELPER_VERSION = "4.9.11"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -809,6 +809,14 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/supabase":
                 out = supabase.load(DATA)
                 out["schemaSql"] = supabase.SCHEMA_SQL
+                # What was SENT, from this machine's own record. Deliberately
+                # not a question asked of Supabase: the mirror could have been
+                # emptied there and this would not know, so it is never
+                # described as "in sync".
+                try:
+                    out["mirror"] = archive.mirror_status(ARCHIVE_DB)
+                except Exception as exc:
+                    out["mirror"] = {"error": str(exc)[:120]}
                 return self._json(out)
 
             if path == "/api/jobs":
@@ -1143,6 +1151,36 @@ class Handler(BaseHTTPRequestHandler):
             saved = supabase.save(DATA, url, key, result)
             saved["testedJustNow"] = True
             return self._json(saved)
+
+        if parsed.path == "/api/supabase/write-key":
+            # The privileged key, which Row Level Security does not apply to.
+            # It stays on this computer: never packaged, never committed, and
+            # never handed back out - only a hint of it is readable.
+            key = (payload.get("key") or "").strip()
+            problem = supabase.check_write_key(key)
+            if problem:
+                return self._json({"error": problem, "saved": False}, 400)
+            if not supabase.load(DATA).get("configured"):
+                return self._json({"error": "Connect the project first.",
+                                   "saved": False}, 400)
+            return self._json(supabase.save_write_key(DATA, key))
+
+        if parsed.path == "/api/supabase/write-key/forget":
+            gone = supabase.forget_write_key(DATA)
+            out = supabase.load(DATA)
+            out["forgotten"] = gone
+            out["note"] = ("The write key is removed from this computer. The "
+                           "connection is kept, but nothing will be sent "
+                           "until it is added again.")
+            return self._json(out)
+
+        if parsed.path == "/api/supabase/push":
+            # Synchronous on purpose. The server is threaded, so this does not
+            # block the app, and a push that reports its real outcome is worth
+            # far more than one that returns instantly and is wrong.
+            result = supabase.push(DATA, ARCHIVE_DB, archive=archive, log=log)
+            result["mirror"] = archive.mirror_status(ARCHIVE_DB)
+            return self._json(result, 200 if result.get("ok") else 502)
 
         if parsed.path == "/api/supabase/forget":
             gone = supabase.forget(DATA)

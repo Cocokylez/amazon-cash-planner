@@ -17,6 +17,7 @@
 const { execFileSync } = require('child_process');
 const crypto = require('crypto');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const GH = 'C:\\Program Files\\GitHub CLI\\gh.exe';
@@ -37,7 +38,10 @@ function sha512Base64(file) {
 
 /* GitHub replaces spaces in asset names with dashes, and latest.yml has to
    name the asset exactly as it is served. */
-const built = fs.readdirSync(OUT)
+/* readdirSync on a folder that is not there throws before the check below
+   ever runs, turning "you forgot to build" into a stack trace about scandir.
+   The advice was already written; it just needed to be reachable. */
+const built = (fs.existsSync(OUT) ? fs.readdirSync(OUT) : [])
   .find(f => f.startsWith('Amazon Cash Planner Setup ') && f.endsWith('.exe'));
 if (!built) {
   console.error('\n  No installer in dist-desktop. Run the build first.\n');
@@ -92,10 +96,21 @@ console.log('  uploaded latest.yml');
 /* Checked against what GitHub serves, not what is on this disk. A wrong hash
    here would show up as an update that fails for reasons nobody could guess. */
 const url = 'https://github.com/' + REPO + '/releases/download/' + TAG + '/' + asset;
-const tmp = path.join(OUT, '.verify.tmp');
-execFileSync('curl', ['-sL', '-o', tmp, url], { maxBuffer: 1 << 26 });
-const served = sha512Base64(tmp);
-fs.unlinkSync(tmp);
+
+/* Downloaded OUTSIDE the build folder. It used to land in dist-desktop, and
+   a copy left behind - or still held by the download - made the NEXT build
+   fail on "cannot remove: Device or resource busy". A verification step must
+   not be able to break the thing it verifies. */
+const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'acp-verify-'));
+const tmp = path.join(scratch, 'downloaded.bin');
+let served;
+try {
+  execFileSync('curl', ['-sL', '-o', tmp, url], { maxBuffer: 1 << 26 });
+  served = sha512Base64(tmp);
+} finally {
+  /* Always, even when the download or the hash threw. */
+  fs.rmSync(scratch, { recursive: true, force: true });
+}
 
 if (served !== digest) {
   console.error('\n  The asset on the release does NOT match latest.yml.'

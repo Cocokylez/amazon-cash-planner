@@ -20,6 +20,22 @@ const path = require('path');
    matter most - the ones where this program declines to do something - can be
    tested without a window, a display, or a real failure to trigger them. */
 const H = require('./helper.js');
+const fs = require('fs');
+
+/* Everything the shell says, kept in a file.
+ *
+ * stdout goes nowhere for an installed app: an update that quietly did not
+ * install looks exactly like one that was never offered, and there was no way
+ * to tell them apart afterwards. Nothing secret is written here - the token is
+ * never part of a status line. */
+function logLine(text) {
+  try {
+    const dir = H.dataDir();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'shell.log'),
+      new Date().toISOString() + '  ' + text + '\n');
+  } catch (e) { /* a log that cannot be written must not stop the app */ }
+}
 
 const ROOT = () => H.appRoot({
   packaged: app.isPackaged, resourcesPath: process.resourcesPath });
@@ -102,6 +118,7 @@ function say(text, kind, action) {
      open is no message at all. Nothing secret passes through here - the token
      is never part of a status line. */
   console.log('[shell] ' + String(text));
+  logLine(String(text));
   lastStatus = { text: String(text), kind: kind || 'working',
     action: action || null };
   if (statusWindow && !statusWindow.isDestroyed()) {
@@ -231,6 +248,31 @@ function runSetup() {
   });
 }
 
+/* Asked again while the app stays open.
+ *
+ * The check used to happen once, at launch. Someone who leaves the app open -
+ * which is the whole point of it - would never see a release published an
+ * hour later, and "I waited" would be met with nothing happening, because
+ * nothing was waiting.
+ *
+ * Six hours: often enough that a day's work picks up a release, rare enough
+ * that it is not asking GitHub about a file that changes a few times a week.
+ * An update that IS found still installs on quit, so this never interrupts
+ * anything. */
+const RECHECK_EVERY_MS = 6 * 60 * 60 * 1000;
+let recheckTimer = null;
+
+function keepCheckingForUpdates() {
+  if (recheckTimer) return;
+  recheckTimer = setInterval(() => {
+    /* Skipped while setup is running: it is already downloading a browser,
+       and two large downloads at once helps nobody. */
+    if (!setupRunning) checkForUpdates();
+  }, RECHECK_EVERY_MS);
+  /* Not a reason to keep the app alive when everything else has finished. */
+  if (recheckTimer.unref) recheckTimer.unref();
+}
+
 ipcMain.handle('shell:run-setup', () => { runSetup(); return true; });
 ipcMain.handle('shell:open-python', () => {
   shell.openExternal('https://www.python.org/downloads/');
@@ -310,6 +352,9 @@ async function boot() {
 
   say('Ready.', 'ready');
   openApp(started.base + '/#token=' + encodeURIComponent(cfg.token));
+
+  /* From here the app may stay open for days. Keep asking. */
+  keepCheckingForUpdates();
 }
 
 /* What the last update check found.
@@ -322,6 +367,8 @@ const updates = {
   state: 'unknown',        // unknown | checking | current | available | failed | off
   detail: '',
   checkedAt: null,
+  ready: false,            // downloaded and waiting to be applied
+  readyVersion: '',
 };
 
 function setUpdateState(state, detail) {
@@ -351,6 +398,24 @@ ipcMain.handle('shell:info', () => shellInfo());
 ipcMain.handle('shell:check-updates', async () => {
   checkForUpdates();
   return shellInfo();
+});
+
+/* Apply a downloaded update now.
+ *
+ * The helper is stopped FIRST, and only one this program started: the
+ * installer replaces the folder the app runs from, and a process still
+ * holding files in it is what produces "cannot be closed" half-installs. */
+ipcMain.handle('shell:install-update', async () => {
+  if (!updates.ready) return { ok: false, detail: 'No update is downloaded.' };
+  logLine('installing update ' + updates.readyVersion);
+  try {
+    await stopHelper(readConfig());
+  } catch (e) { /* a helper that will not stop is not a reason to stay old */ }
+  const { autoUpdater } = require('electron-updater');
+  /* isSilent false, isForceRunAfter true: the installer is visible, and the
+     app comes back by itself rather than leaving someone looking at nothing. */
+  setImmediate(() => autoUpdater.quitAndInstall(false, true));
+  return { ok: true };
 });
 
 /* Wired, and inert until a feed exists.
@@ -393,8 +458,16 @@ function checkForUpdates() {
   autoUpdater.on('update-available', () => report('available', 'found'));
   autoUpdater.on('download-progress', p => setUpdateState('available',
     'Downloading the update: ' + Math.round(p.percent || 0) + '%'));
-  autoUpdater.on('update-downloaded', () => setUpdateState('available',
-    'The update is ready. It installs when you close the app.'));
+  autoUpdater.on('update-downloaded', info => {
+    updates.ready = true;
+    updates.readyVersion = (info && info.version) || '';
+    /* Offered, not just announced. Relying on the quit to do it meant an
+       update could sit "ready" indefinitely - downloaded, never applied, and
+       indistinguishable from one that never arrived. */
+    setUpdateState('available',
+      'Version ' + (updates.readyVersion || 'the update')
+      + ' is downloaded and ready to install.');
+  });
   autoUpdater.on('error',
     e => report('failed', 'failed', e && e.message));
 

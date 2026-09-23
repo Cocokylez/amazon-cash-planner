@@ -20,6 +20,10 @@ contextBridge.exposeInMainWorld('desktopShell', {
   /* Asks for a check now. Resolves with the same shape as info(). */
   check: () => ipcRenderer.invoke('shell:check-updates'),
 
+  /* Applies an update that has already downloaded. Nothing happens
+     unless it is asked for. */
+  install: () => ipcRenderer.invoke('shell:install-update'),
+
   /* Fired as the check progresses, so the panel does not have to poll. */
   onUpdate(handler) {
     ipcRenderer.on('update-status', (_event, payload) => {
