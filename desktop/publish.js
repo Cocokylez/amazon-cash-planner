@@ -74,12 +74,15 @@ if (!wanted.includes(asset)) {
 let createdHere = false;
 try {
   gh('release', 'view', TAG, '--repo', REPO);
-  console.log('  release ' + TAG + ' already exists; reusing it');
+  /* Back to draft while it is worked on. Re-uploading into a published
+     release reopens the same window this whole dance exists to close. */
+  gh('release', 'edit', TAG, '--repo', REPO, '--draft=true');
+  console.log('  release ' + TAG + ' already exists; reusing it as a draft');
 } catch (e) {
   gh('release', 'create', TAG, '--repo', REPO, '--title', pkg.version,
-    '--notes', 'Amazon Cash Planner ' + pkg.version);
+    '--notes', 'Amazon Cash Planner ' + pkg.version, '--draft');
   createdHere = true;
-  console.log('  created release ' + TAG);
+  console.log('  created DRAFT release ' + TAG);
 }
 
 /* From here on a failure must not leave a release standing. */
@@ -155,7 +158,8 @@ console.log('  uploaded latest.yml');
 
 /* Checked against what GitHub serves, not what is on this disk. A wrong hash
    here would show up as an update that fails for reasons nobody could guess. */
-const url = 'https://github.com/' + REPO + '/releases/download/' + TAG + '/' + asset;
+/* Downloaded through gh, not the public URL: the release is still a draft
+   at this point, and a draft is exactly what the public URL will not serve. */
 
 /* Downloaded OUTSIDE the build folder. It used to land in dist-desktop, and
    a copy left behind - or still held by the download - made the NEXT build
@@ -165,7 +169,9 @@ const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'acp-verify-'));
 const tmp = path.join(scratch, 'downloaded.bin');
 let served;
 try {
-  execFileSync('curl', ['-sL', '-o', tmp, url], { maxBuffer: 1 << 26 });
+  gh('release', 'download', TAG, '--repo', REPO, '--pattern', asset,
+    '--dir', scratch, '--clobber');
+  fs.renameSync(path.join(scratch, asset), tmp);
   served = sha512Base64(tmp);
 } finally {
   /* Always, even when the download or the hash threw. */
@@ -178,6 +184,22 @@ if (served !== digest) {
     + '\n  this is published.\n');
   process.exit(1);
 }
+
+/* THE LAST STEP, deliberately.
+
+   Creating the release first and uploading into it left a window minutes
+   long - as long as 112 MB takes - in which GitHub answered "this is the
+   latest release" and served nothing. Every app that checked during an
+   upload got a 404 for latest.yml and reported that updates were broken.
+
+   A draft is invisible to all of that. The release becomes real only once
+   every file is on it and the installer's hash has been checked. */
+try {
+  gh('release', 'edit', TAG, '--repo', REPO, '--draft=false');
+} catch (e) {
+  abandon('The release could not be published: ' + e.message);
+}
+console.log('  published ' + TAG + ' (it was a draft until now)');
 
 console.log('\n  verified: the file GitHub serves matches latest.yml');
 console.log('  https://github.com/' + REPO + '/releases/tag/' + TAG + '\n');
