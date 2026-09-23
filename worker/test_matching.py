@@ -1768,6 +1768,78 @@ finally:
     _p.shutdown()
 
 
+section("The connection test asks a question the key is allowed to answer")
+
+# The endpoint mattered more than anything about the key.
+#
+# /rest/v1/ is PostgREST's OpenAPI root, and Supabase restricts it to SECRET
+# keys: "Only secret API keys can be used for this endpoint." So the test
+# refused the exact key people are told to paste, every time, with a 401 that
+# reads like a bad key. Three freshly minted keys were rejected before the URL
+# was suspected.
+check("the probe is a real table, not the introspection root",
+      SB.PROBE.startswith("/rest/v1/" + SB.PROBE_TABLE + "?"), True)
+check("and it asks for almost nothing", "limit=1" in SB.PROBE, True)
+
+
+class _LikeSupabase(BaseHTTPRequestHandler):
+    """Answers the way the real project does: the root is secret-key-only,
+    a table query is fine."""
+
+    missing = False
+
+    def do_GET(self):
+        if self.path.rstrip("/") == "/rest/v1":
+            b = (b'{"message":"Secret API key required","hint":"Only secret '
+                 b'API keys can be used for this endpoint."}')
+            self._say(401, b)
+            return
+        if _LikeSupabase.missing:
+            self._say(404, b'{"code":"PGRST205","message":"Could not find the '
+                           b'table \'public.reports\' in the schema cache"}')
+            return
+        self._say(200, b'[]')
+
+    def _say(self, code, body):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+
+_ls = HTTPServer(("127.0.0.1", 0), _LikeSupabase)
+_th.Thread(target=_ls.serve_forever, daemon=True).start()
+_lsurl = "http://127.0.0.1:%d" % _ls.server_address[1]
+
+_real_shape = SB.check_shape
+SB.check_shape = lambda u, k: None
+try:
+    _ok = SB.test(_lsurl, "sb_publishable_" + "q" * 30)
+    check("a publishable key connects to a project like the real one",
+          _ok["ok"], True)
+    check("and the root's refusal never comes into it",
+          "Secret API key" in _ok["detail"], False)
+
+    # Tables not made yet. The credentials are proven either way - only the
+    # setup SQL is outstanding - so this is a connection with one step left,
+    # not a rejection that sends somebody to re-copy a working key.
+    _LikeSupabase.missing = True
+    _ns = SB.test(_lsurl, "sb_publishable_" + "q" * 30)
+    check("a missing table is still a real connection", _ns["ok"], True)
+    check("and it is flagged as needing the schema", _ns["needsSchema"], True)
+    check("and says which step is left",
+          "setup SQL" in _ns["detail"], True)
+    check("a connected project is not flagged as needing it",
+          _ok.get("needsSchema"), False)
+finally:
+    SB.check_shape = _real_shape
+    _ls.shutdown()
+
+
 
 print("passed %d   failed %d" % (PASS, FAIL))
 if FAILURES:

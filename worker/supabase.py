@@ -350,22 +350,36 @@ class _Reply:
         return self._h.get(str(name).lower(), default)
 
 
+# What the connection test asks for.
+#
+# NOT "/rest/v1/". That is PostgREST's OpenAPI root, and Supabase restricts it
+# to secret keys: a publishable key gets 401 "Secret API key required" there,
+# always, no matter how correct it is. Testing against it meant the one key
+# people are told to paste was the one key guaranteed to fail.
+#
+# A real table is the honest question anyway - it is what the mirror will
+# actually do, and Row Level Security answers it with an empty list rather
+# than an error, so a locked table still proves the connection.
+PROBE_TABLE = "reports"
+PROBE = "/rest/v1/" + PROBE_TABLE + "?select=report_id&limit=1"
+
+
 def test(url: str, key: str) -> dict:
     """Actually talk to the project. This is the only thing that proves it.
 
-    Returns {ok, detail} - and ok is True only when a request went out and
-    came back recognisable as a database.
+    Returns {ok, detail, needsSchema} - and ok is True only when a request
+    went out and came back from a database.
     """
     problem = check_shape(url, key)
     if problem:
         return {"ok": False, "detail": problem}
 
     key = key.strip()
-    endpoint = url.strip().rstrip("/") + "/rest/v1/"
+    endpoint = url.strip().rstrip("/") + PROBE
 
     # The right header shape for this kind of key first, then the other one.
-    # Both are tried rather than assumed: being wrong here produces "Invalid
-    # API key", a message that blames the key and hides the real cause.
+    # Both are tried rather than assumed: being wrong there produces "Invalid
+    # API key", a message that blames the key and hides the cause.
     got = None
     for bearer in (is_jwt(key), not is_jwt(key)):
         got = _attempt(endpoint, key, bearer)
@@ -378,22 +392,28 @@ def test(url: str, key: str) -> dict:
         wrong = _not_a_database(_Reply(got), got["body"])
         if wrong:
             return {"ok": False, "detail": wrong}
-        return {"ok": True, "detail":
+        return {"ok": True, "needsSchema": False, "detail":
                 "The project answered. This is a real connection, not a "
                 "saved setting."}
 
     code, body = got["status"], got["body"]
+    said = ""
+    try:
+        said = (json.loads(body) or {}).get("message") or ""
+    except Exception:
+        said = body[:160]
+
+    # The tables are not there yet. The credentials are fine - this answer
+    # could only have come from the project - so this is a connection, with
+    # one thing left to do. Reporting it as a failure would send somebody off
+    # to re-copy a key that was never wrong.
+    if code == 404 or "PGRST205" in body or "Could not find the table" in body:
+        return {"ok": True, "needsSchema": True, "detail":
+                "Connected - the project answered. Its tables are not there "
+                "yet: run the setup SQL below in Supabase > SQL Editor, then "
+                "figures can be sent."}
+
     if code in (401, 403):
-        # The project's own words, kept. "Invalid API key" and "No API key
-        # found in request" are different problems with different fixes, and
-        # discarding the body to print generic advice made both the same dead
-        # end.
-        said = ""
-        try:
-            said = (json.loads(body) or {}).get("message") or ""
-        except Exception:
-            said = body[:160]
-        # The shape of what was sent, never the value.
         shape = "%d characters, starts %s" % (len(key), key[:15] or "?")
         return {"ok": False, "detail":
                 "The project rejected that key (%d)%s You sent %s. Copy it "
