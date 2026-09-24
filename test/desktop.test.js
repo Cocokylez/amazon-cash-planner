@@ -727,6 +727,24 @@ const H = require('../desktop/helper.js');
       /This installation is incomplete[\s\S]{0,400}kind: 'open-releases'/.test(main));
   }
 
+  /* A finished report never shows an old error, and is imported once. */
+  {
+    const fs12 = require('fs');
+    const p12 = (...a) => require('path').join(__dirname, '..', ...a);
+    const app = fs12.readFileSync(p12('lib', 'app.js'), 'utf8');
+    const helper = fs12.readFileSync(p12('worker', 'worker.py'), 'utf8');
+    T.ok('marking a report imported clears any earlier error',
+      /status="complete", finishedAt=now\(\), lastError=None/.test(helper));
+    T.ok('the reports table shows what a finished report did, not a stale error',
+      (app.match(/status === 'complete' \? \((j|job)\.statusDetail \|\| ''\)/g) || []).length === 2);
+    T.ok('two refreshes cannot import the same report at once',
+      /importingNow\.has\(j\.jobId\)/.test(app) && /finally \{\s*importingNow\.delete\(j\.jobId\)/.test(app)
+      && !/_taken/.test(app));
+    T.ok('with no period chosen, the download panel says so instead of inventing one',
+      /No period chosen, so each report uses its own window/.test(app)
+      && !/state\.filters\.to \|\| CSV\.addDays\(state\.today, 13\)/.test(app));
+  }
+
   /* "Today", and the periods built on it. */
   {
     const fs10 = require('fs');

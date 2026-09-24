@@ -83,7 +83,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.25"
+HELPER_VERSION = "4.9.26"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -1612,8 +1612,11 @@ class Handler(BaseHTTPRequestHandler):
             job = JOBS.get(job_id)
             if not job or job['status'] != 'importing' or not job.get('filePath'):
                 return self._json({'error': 'No downloaded file awaiting import'}, 409)
+            # lastError cleared: a job that imported has no error, and one
+            # left from an earlier attempt read as "Complete - could not
+            # import it", which is two opposite things in one row.
             upd = JOBS.update(
-                job_id, status="complete", finishedAt=now(),
+                job_id, status="complete", finishedAt=now(), lastError=None,
                 rowCount=payload.get("rowsAccepted"),
                 statusDetail="Imported %s of %s rows." % (
                     payload.get("rowsAccepted"), payload.get("rowsProcessed")))
