@@ -81,7 +81,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.21"
+HELPER_VERSION = "4.9.22"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -630,6 +630,21 @@ def range_for(report_type: str, today: date | None = None) -> tuple[str, str]:
         start = t + timedelta(days=1)
         return start.isoformat(), (start + timedelta(days=spec["aheadDays"] - 1)).isoformat()
     return (t - timedelta(days=spec["backDays"])).isoformat(), t.isoformat()
+
+
+def history_window(dfrom: str, dto: str, today: date | None = None) -> tuple[str, str] | None:
+    """Can the period on screen be used for a HISTORY report?
+
+    Only if it has already happened. "Next 8 weeks" on screen used to be
+    passed straight to the transactions report - asking Amazon for history
+    that does not exist yet. A period reaching into the future is cut at
+    today; one that starts after today is not used at all, and the report
+    keeps its own backward window.
+    """
+    t = (today or date.today()).isoformat()
+    if not dfrom or not dto or dfrom > t:
+        return None
+    return dfrom, min(dto, t)
 
 
 def report_ready(report_type: str) -> tuple[bool, str]:
@@ -1206,7 +1221,9 @@ class Handler(BaseHTTPRequestHandler):
                 spec = REPORTS[rt]
                 dfrom, dto = range_for(rt)
                 if override_from and override_to and spec["rangeKind"] == "historical":
-                    dfrom, dto = override_from, override_to
+                    usable = history_window(override_from, override_to)
+                    if usable:
+                        dfrom, dto = usable
 
                 # The SKU Economics page ticks every marketplace in ONE report,
                 # so it gets one job. Looping countries here would request the

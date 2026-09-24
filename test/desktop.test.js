@@ -704,5 +704,25 @@ const H = require('../desktop/helper.js');
     T.ok('disconnecting stops it', (app.match(/stopCloudSync\(\)/g) || []).length >= 2);
   }
 
+  /* "Today", and the periods built on it. */
+  {
+    const fs10 = require('fs');
+    const app = fs10.readFileSync(require('path').join(__dirname, '..', 'lib', 'app.js'), 'utf8');
+    T.ok('today is this computer’s date, not London’s', /today: localToday\(\)/.test(app)
+      && !/today: new Date\(\)\.toISOString\(\)/.test(app));
+    T.ok('a saved "Next 8 weeks" is worked out again for today when the app opens',
+      /function applyStateDoc[\s\S]*?refreshPresetDates\(\);\s*\}/.test(app));
+    T.ok('and again when the date changes with the app open', /setInterval\(checkDateRollover/.test(app));
+    T.ok('forecast coverage is counted from tomorrow, like the forecast itself',
+      /Preview\.coverage\(scopedPreviews\(\), horizonStart\(\), horizonEnd\(\)\)/.test(app));
+    T.ok('one forward horizon everywhere', !/addDays\(state\.today, 55\)/.test(app));
+    /* The preset rule itself, run for the example in question. */
+    const next8 = /\{ id: 'next-8w'[\s\S]*?of: t => \(\{ from: CSV\.addDays\(t, (\d+)\), to: CSV\.addDays\(t, (\d+)\) \}\)/.exec(app);
+    const CSV = require('../lib/csv.js');
+    T.eq('on the 24th, "Next 8 weeks" is the 25th to 19 Nov',
+      next8 && [CSV.addDays('2026-09-24', +next8[1]), CSV.addDays('2026-09-24', +next8[2])].join(' '),
+      '2026-09-25 2026-11-19');
+  }
+
   T.report();
 })();

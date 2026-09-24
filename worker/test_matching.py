@@ -552,6 +552,15 @@ _hf, _ht = W.range_for("date-range-transactions", _t)
 check("a HISTORICAL window still ends today", _ht, "2026-09-22")
 check("and looks backwards", _hf < _ht, True)
 
+# The period on screen is only borrowed by a history report when it has
+# happened. "Next 8 weeks" is not a period anyone can have transactions for.
+check("a past period is used as it is",
+      W.history_window("2026-08-01", "2026-08-31", _t), ("2026-08-01", "2026-08-31"))
+check("one running past today is cut at today",
+      W.history_window("2026-09-01", "2026-10-15", _t), ("2026-09-01", "2026-09-22"))
+check("one entirely in the future is not used at all",
+      W.history_window("2026-09-23", "2026-11-17", _t), None)
+
 
 section("Finding OUR row in the Generated Reports list")
 
