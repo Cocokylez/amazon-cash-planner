@@ -637,5 +637,30 @@ const H = require('../desktop/helper.js');
       /with SYNC_LOCK:\s*\n\s*result = supabase\.sync\(/.test(helper));
   }
 
+  /* The three hand-entered inputs. Their rules are tested in inputs.test.js;
+     these check the page actually wires them up - a module the page never
+     loads would pass every rule test and still do nothing. */
+  {
+    const fs7 = require('fs');
+    const p7 = (...a) => require('path').join(__dirname, '..', ...a);
+    const html = fs7.readFileSync(p7('app.html'), 'utf8');
+    const app = fs7.readFileSync(p7('lib', 'app.js'), 'utf8');
+    const at = n => html.indexOf('<script src="lib/' + n + '"></script>');
+    T.ok('the page loads the inputs module', at('inputs.js') > 0);
+    T.ok('after what it needs, before the app', at('recon.js') < at('inputs.js') && at('inputs.js') < at('app.js'));
+    T.ok('no input card says the app cannot take it any more', !/cannot take this input yet/.test(app));
+    for (const id of ['depositsform', 'costsform', 'adsform']) {
+      T.ok('the ' + id + ' card exists and its cards jump to it',
+        app.includes('id="' + id + '"') && app.includes('data-jump="' + id + '"'));
+    }
+    T.ok('the engines see measured transit, not only the typed rules',
+      (app.match(/policy: enginePolicy\(\)/g) || []).length >= 3);
+    T.ok('the Measured tag comes from a real measurement', /const measured = t\.available;/.test(app)
+      && !/const measured = state\.bankDeposits\.length > 0/.test(app));
+    T.ok('profit gets external advertising from the records, not a hard null',
+      !/externalAdvertising: null,/.test(app));
+    T.ok('forecast-only profit matches costs by MSKU', !/\[c\.sku, c\]/.test(app));
+  }
+
   T.report();
 })();

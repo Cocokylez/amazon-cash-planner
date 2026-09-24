@@ -385,7 +385,9 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent);
 .field { margin-bottom: var(--s2); }
 .frow { display: grid; gap: var(--s2); }
 @media (min-width: 640px) { .frow.f2 { grid-template-columns: 1fr 1fr; }
-                            .frow.f3 { grid-template-columns: repeat(3,1fr); } }
+                            .frow.f3 { grid-template-columns: repeat(3,1fr); }
+                            .frow.f4 { grid-template-columns: 1fr 1fr; } }
+@media (min-width: 1000px) { .frow.f4 { grid-template-columns: repeat(4,1fr); } }
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px;
        min-height: 36px; background: var(--accent); color: var(--accent-ink);
        border: 1px solid transparent; border-radius: var(--r-ctl); padding: 0 12px;
@@ -673,6 +675,7 @@ details[open] > summary { margin-bottom: 10px; }
 <script src="lib/forecast.js"></script>
 <script src="lib/profit.js"></script>
 <script src="lib/recon.js"></script>
+<script src="lib/inputs.js"></script>
 <script src="lib/dataset.js"></script>
 <script src="lib/store.js"></script>
 <script src="lib/sync.js"></script>
