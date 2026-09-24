@@ -2253,6 +2253,44 @@ _Docs.mode = "ok"
 check("and ready once it answers", SB.docs_status(_dh)["ready"], True)
 _ds.shutdown()
 
+
+section("A restart never leaves a report stuck, and an update is never blocked by one")
+
+import worker as _WU                                       # noqa: E402
+
+
+class _Jobs:
+    def __init__(self, rows):
+        self.rows = {r["jobId"]: dict(r) for r in rows}
+
+    def list(self):
+        return [dict(r) for r in self.rows.values()]
+
+    def update(self, job_id, **kw):
+        self.rows[job_id].update(kw)
+        return dict(self.rows[job_id])
+
+
+_js = _Jobs([{"jobId": "q", "status": "queued"}, {"jobId": "d", "status": "downloading"},
+             {"jobId": "l", "status": "login-required"}, {"jobId": "v", "status": "validating"},
+             {"jobId": "i", "status": "importing"}, {"jobId": "c", "status": "complete"}])
+_rec = _WU.recover_interrupted(_js)
+check("a queued report goes back in the queue", _rec["requeued"], ["q"])
+check("one cut off in the browser is marked interrupted, not left 'downloading'",
+      _js.rows["d"]["status"], "failed")
+check("and says so", "Interrupted" in _js.rows["d"]["lastError"], True)
+check("waiting for sign-in and validating are treated the same",
+      (_js.rows["l"]["status"], _js.rows["v"]["status"]), ("failed", "failed"))
+check("a report waiting to be imported keeps its file and its place",
+      _js.rows["i"]["status"], "importing")
+check("finished reports are untouched", _js.rows["c"]["status"], "complete")
+check("only a report using the browser right now holds a shutdown",
+      set(_WU.IN_BROWSER), {"login-required", "requesting", "generating", "downloading"})
+
+_launch = (Path(_WU.HERE) / "launch.py").read_text("utf-8")
+check("the helper runs from the data folder, never inside the program folder",
+      "cwd=str(DATA)" in _launch and "cwd=HERE, stdin" not in _launch, True)
+
 print("passed %d   failed %d" % (PASS, FAIL))
 if FAILURES:
     print("\nFAILURES")

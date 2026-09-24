@@ -96,6 +96,7 @@
     act.disabled = true;          /* one click is one action */
     if (pending.kind === 'run-setup') window.shellStatus.runSetup();
     else if (pending.kind === 'open-python') window.shellStatus.openPython();
+    else if (pending.kind === 'open-releases') window.shellStatus.openReleases();
   });
 </script>
 </body>

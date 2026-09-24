@@ -58,9 +58,11 @@ function startHelper(onProgress) {
 
     onProgress('Starting the helper…');
 
-    /* --no-browser, because the window is this program's job. */
+    /* --no-browser, because the window is this program's job. Run from the
+       data folder: a working folder inside the program folder keeps it open,
+       and an update cannot replace a folder something is sitting in. */
     const child = spawn(py, [path.join(ROOT(), 'worker', 'launch.py'),
-      '--no-browser'], { cwd: path.join(ROOT(), 'worker'), windowsHide: true });
+      '--no-browser'], { cwd: H.dataDir(), windowsHide: true });
 
     let out = '';
     let err = '';
@@ -167,8 +169,28 @@ function openApp(url) {
    belongs to whoever started it - closing this window is not permission to
    end their session. */
 function stopHelper(cfg) {
+  if (!weStartedIt || !cfg) return Promise.resolve();
+  return askToStop(cfg);
+}
+
+/* Before an update, the helper stops WHOEVER started it - usually Windows, at
+   login, which is exactly why "only if we started it" left it running. It is
+   this app's own helper (checked by its answer, not assumed), the update
+   replaces the folder it runs from, and an installer that finds it there
+   leaves that folder empty. Resolves true only once it has actually gone. */
+async function stopHelperForUpdate(cfg) {
+  if (!cfg) return true;
+  if ((await portState(cfg)) !== 'ours') return true;
+  await askToStop(cfg);
+  for (let i = 0; i < 40; i++) {
+    if ((await portState(cfg)) !== 'ours') return true;
+    await new Promise(r => setTimeout(r, 250));
+  }
+  return false;
+}
+
+function askToStop(cfg) {
   return new Promise(resolve => {
-    if (!weStartedIt || !cfg) { resolve(); return; }
     const req = http.request({
       host: '127.0.0.1', port: cfg.port, path: '/api/shutdown',
       method: 'POST', timeout: 4000,
@@ -343,6 +365,12 @@ ipcMain.handle('claude:ask', async (event, req) => {
 });
 
 ipcMain.handle('shell:run-setup', () => { runSetup(); return true; });
+ipcMain.handle('shell:open-releases', () => {
+  const pkg = require('../package.json');
+  const pub = (pkg.build && pkg.build.publish && pkg.build.publish[0]) || {};
+  shell.openExternal('https://github.com/' + pub.owner + '/' + pub.repo + '/releases/latest');
+  return true;
+});
 ipcMain.handle('shell:open-python', () => {
   shell.openExternal('https://www.python.org/downloads/');
   return true;
@@ -367,6 +395,16 @@ async function boot() {
     say('The helper is not set up on this computer yet. It runs once, takes a '
       + 'few minutes, and everything stays on this computer.', 'stopped',
       { label: 'Set up the helper', kind: 'run-setup' });
+    return;
+  }
+
+  const missing = H.missingProgramFiles(ROOT());
+  if (missing.length) {
+    say('This installation is incomplete: an update did not finish, and '
+      + missing.join(', ') + ' ' + (missing.length === 1 ? 'is' : 'are') + ' missing. '
+      + 'Your data is safe - it is kept separately. Download the installer, close '
+      + 'this app, and run it once.', 'stopped',
+      { label: 'Download the installer', kind: 'open-releases' });
     return;
   }
 
@@ -506,10 +544,16 @@ ipcMain.handle('shell:check-updates', async () => {
  * holding files in it is what produces "cannot be closed" half-installs. */
 ipcMain.handle('shell:install-update', async () => {
   if (!updates.ready) return { ok: false, detail: 'No update is downloaded.' };
+  /* Not installed over a running helper: that is what emptied its folder.
+     If it will not stop, the update waits - nothing is forced. */
+  let stopped = false;
+  try { stopped = await stopHelperForUpdate(readConfig()); } catch (e) { stopped = false; }
+  if (!stopped) {
+    logLine('update ' + updates.readyVersion + ' held: the helper did not stop');
+    return { ok: false, detail: 'A report is downloading from Amazon right now. The update '
+      + 'will install once it has finished - try again in a minute.' };
+  }
   logLine('installing update ' + updates.readyVersion);
-  try {
-    await stopHelper(readConfig());
-  } catch (e) { /* a helper that will not stop is not a reason to stay old */ }
   const { autoUpdater } = require('electron-updater');
   /* isSilent false, isForceRunAfter true: the installer is visible, and the
      app comes back by itself rather than leaving someone looking at nothing. */
@@ -585,7 +629,20 @@ function checkForUpdates() {
 app.whenReady().then(boot);
 
 app.on('window-all-closed', async () => {
-  await stopHelper(readConfig());
+  const cfg = readConfig();
+  if (updates.ready) {
+    /* The update installs as the app quits, so the helper must be gone
+       first. If it will not stop, the update is kept for next time rather
+       than installed over it. */
+    let stopped = false;
+    try { stopped = await stopHelperForUpdate(cfg); } catch (e) { stopped = false; }
+    if (!stopped) {
+      try { require('electron-updater').autoUpdater.autoInstallOnAppQuit = false; } catch (e) { /* no updater */ }
+      logLine('update ' + updates.readyVersion + ' kept for next time: the helper did not stop');
+    }
+  } else {
+    await stopHelper(cfg);
+  }
   app.quit();
 });
 

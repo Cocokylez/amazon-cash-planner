@@ -379,7 +379,16 @@ function updateStatus(feed, outcome, detail) {
   return 'Checking for updates…';
 }
 
+/* The files the app cannot run without, beside the code. An update that did
+   not finish leaves this folder empty - that has to be said as what it is,
+   not as "the helper did not report itself healthy". */
+function missingProgramFiles(root) {
+  return ['worker/launch.py', 'worker/worker.py', 'worker/paths.py', 'app.html']
+    .filter(f => !fs.existsSync(path.join(root, ...f.split('/'))));
+}
+
 module.exports = {
+  missingProgramFiles,
   appRoot, dataDir, pythonPath, readConfig, portState,
   instanceId, askSiblingToStop, helperVersion,
   findPython, setupState,

@@ -83,7 +83,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.24"
+HELPER_VERSION = "4.9.25"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -170,6 +170,35 @@ STATUSES = [
     "queued", "login-required", "requesting", "generating",
     "downloading", "validating", "importing", "complete", "failed", "cancelled",
 ]
+# The states in which a report is using the browser this very moment.
+IN_BROWSER = ("login-required", "requesting", "generating", "downloading")
+
+
+def recover_interrupted(jobs) -> dict:
+    """Jobs a previous run of the helper left half-way.
+
+    Nothing picked them up again: a report that was 'downloading' when the
+    helper stopped stayed 'downloading' for ever - and, being "active", it
+    made the helper refuse every shutdown after that, including the one an
+    update needs. At start-up:
+      queued              -> queued again, and put back in the queue
+      in the browser      -> failed, saying it was interrupted; Retry collects
+                             the report Amazon already made (it is resumable)
+      validating          -> failed the same way
+      importing, and every finished state, are left exactly as they are.
+    """
+    requeued, stopped = [], []
+    for j in jobs.list():
+        if j["status"] == "queued":
+            requeued.append(j["jobId"])
+        elif j["status"] in IN_BROWSER or j["status"] == "validating":
+            jobs.update(j["jobId"], status="failed",
+                        lastError="Interrupted: the helper stopped while this "
+                                  "report was in progress.",
+                        statusDetail="Interrupted when the helper stopped. "
+                                     "Retry collects it.")
+            stopped.append(j["jobId"])
+    return {"requeued": requeued, "stopped": stopped}
 
 
 LOG_DIR = DATA / "logs"
@@ -1184,8 +1213,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "bad or missing worker token"}, 401)
         if parsed.path == '/api/shutdown':
             self._drain()
-            if (SETUP.get('session') and not SETUP['session'].snapshot().get('done')) or any(j['status'] not in ('complete', 'failed', 'cancelled') for j in JOBS.list()):
-                return self._json({'error': 'A report is active. Finish it before updating.'}, 409)
+            # Held only by work that is happening RIGHT NOW in the browser. A
+            # report waiting in the queue or waiting to be imported survives a
+            # restart, so it is no reason to refuse - refusing on those left
+            # a stuck "importing" job blocking every update, and the update
+            # then ran with the helper still inside the folder it replaces.
+            busy = [j for j in JOBS.list() if j['status'] in IN_BROWSER]
+            if (SETUP.get('session') and not SETUP['session'].snapshot().get('done')) or busy:
+                return self._json({'error': 'A report is downloading from Amazon right now. '
+                                            'Let it finish, then try again.'}, 409)
             self._json({'ok': True})
             threading.Thread(target=self.server.shutdown, daemon=True).start()
             return
@@ -1623,6 +1659,12 @@ def main() -> None:
 
     preflight()
 
+    recovered = recover_interrupted(JOBS)
+    for job_id in recovered["requeued"]:
+        WORK_QUEUE.put(job_id)
+    if recovered["requeued"] or recovered["stopped"]:
+        log("recovered after restart: %d queued again, %d marked interrupted"
+            % (len(recovered["requeued"]), len(recovered["stopped"])))
     threading.Thread(target=worker_loop, daemon=True).start()
     MIRROR_SYNC.start()
     MIRROR_SYNC.poke("startup")

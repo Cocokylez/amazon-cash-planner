@@ -96,8 +96,12 @@ def main():
         logs = DATA / 'logs'
         logs.mkdir(exist_ok=True)
         with (logs / 'startup.log').open('a', encoding='utf-8') as out:
+            # Run from the DATA folder, never from the program folder. A process
+            # whose working folder is inside the program folder keeps that
+            # folder open, and an update then cannot replace it: the installer
+            # deleted the helper's files and could not put the new ones back.
             child = subprocess.Popen([str(py), '-u', str(Path(__file__).resolve()), '--serve'],
-                cwd=HERE, stdin=subprocess.DEVNULL, stdout=out, stderr=out,
+                cwd=str(DATA), stdin=subprocess.DEVNULL, stdout=out, stderr=out,
                 creationflags=(subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == 'nt' else 0)
         for _ in range(60):
             if child.poll() is not None:

@@ -704,6 +704,29 @@ const H = require('../desktop/helper.js');
     T.ok('disconnecting stops it', (app.match(/stopCloudSync\(\)/g) || []).length >= 2);
   }
 
+  /* An update is never installed over a running helper. It was, whenever
+     Windows had started the helper at login: the installer then emptied the
+     helper's folder and the app could not start at all. */
+  {
+    const fs11 = require('fs');
+    const p11 = (...a) => require('path').join(__dirname, '..', ...a);
+    const main = fs11.readFileSync(p11('desktop', 'main.js'), 'utf8');
+    const Hx = require('../desktop/helper.js');
+    const inst = main.slice(main.indexOf("ipcMain.handle('shell:install-update'"));
+    T.ok('installing stops the helper whoever started it, and checks it is gone',
+      /stopHelperForUpdate\(readConfig\(\)\)/.test(inst.slice(0, 600))
+      && /if \(!stopped\)[\s\S]{0,200}return \{ ok: false/.test(inst.slice(0, 900)));
+    T.ok('installing on quit does the same, or keeps the update for next time',
+      /window-all-closed[\s\S]{0,400}stopHelperForUpdate[\s\S]{0,400}autoInstallOnAppQuit = false/.test(main));
+    T.ok('the helper is started from the data folder', /cwd: H\.dataDir\(\)/.test(main));
+    const tmp = fs11.mkdtempSync(require('path').join(require('os').tmpdir(), 'acp-inst-'));
+    fs11.mkdirSync(require('path').join(tmp, 'worker'));
+    T.eq('an emptied install is recognised, file by file',
+      Hx.missingProgramFiles(tmp).join(','), 'worker/launch.py,worker/worker.py,worker/paths.py,app.html');
+    T.ok('and said as what it is, with a way to get the installer',
+      /This installation is incomplete[\s\S]{0,400}kind: 'open-releases'/.test(main));
+  }
+
   /* "Today", and the periods built on it. */
   {
     const fs10 = require('fs');

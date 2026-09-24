@@ -34,4 +34,5 @@ contextBridge.exposeInMainWorld('shellStatus', {
   /* Nothing here runs without being clicked. */
   runSetup: () => ipcRenderer.invoke('shell:run-setup'),
   openPython: () => ipcRenderer.invoke('shell:open-python'),
+  openReleases: () => ipcRenderer.invoke('shell:open-releases'),
 });
