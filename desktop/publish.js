@@ -66,8 +66,11 @@ function checkPackaged() {
   } catch (e) {
     return ['a readable app.asar (' + e.message + ')'];
   }
+  /* The shell and its dependencies are in app.asar. The page itself is NOT:
+     the helper serves it from resources/app, so that is where app.html, its
+     scripts and its fonts are checked (below). */
   const problems = [
-    'package.json', 'app.html',
+    'package.json',
     'desktop/main.js', 'desktop/helper.js', 'desktop/app-preload.js', 'desktop/claude.js',
     'lib/app.js', 'lib/inputs.js', 'lib/sync.js', 'lib/worker.js',
     'lib/fonts/inter-latin-wght-normal.woff2', 'lib/fonts/OFL.txt',
@@ -77,7 +80,8 @@ function checkPackaged() {
   for (const f of ['app/worker/worker.py', 'app/worker/supabase.py', 'app/worker/secretbox.py',
     'app/worker/archive.py', 'app/worker/paths.py', 'app/worker/launch.py',
     'app/worker/install.py', 'app/worker/requirements.txt',
-    'app/lib/app.js', 'app/lib/inputs.js', 'app/app.html']) {
+    'app/lib/app.js', 'app/lib/inputs.js', 'app/lib/sync.js', 'app/app.html',
+    'app/lib/fonts/inter-latin-wght-normal.woff2', 'app/lib/fonts/inter-latin-ext-wght-normal.woff2']) {
     if (!fs.existsSync(path.join(res, f))) problems.push(f);
   }
   /* And the reverse: nothing of this computer's rode along. */
