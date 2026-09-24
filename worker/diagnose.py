@@ -137,7 +137,7 @@ except Exception:
     w("settings.json : not written yet (normal before first use)")
 
 try:
-    sel = json.loads((HERE / "selectors.json").read_text("utf-8"))
+    sel = json.loads((paths.data_dir() / "selectors.json").read_text("utf-8"))
     for k, v in sel.items():
         w("report setup  : %-26s verified=%s  url=%s"
           % (k, v.get("verified"), "[recorded locally]"))

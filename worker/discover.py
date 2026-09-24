@@ -19,7 +19,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import paths                      # noqa: E402
-SELECTORS_PATH = HERE / "selectors.json"
+SELECTORS_PATH = paths.data_dir() / "selectors.json"
 PROFILE_DIR = paths.data_dir() / "profile"
 
 REPORTS = {

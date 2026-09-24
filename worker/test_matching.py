@@ -499,6 +499,15 @@ section("This report needs no recorded setup")
 
 ready, why = W.report_ready("fees-preview")
 check("it is ready without selectors.json", ready, True)
+
+# The recorded setup survives an update: it lives with this computer's other
+# things, not beside the code an installer replaces. It used to, and every
+# update sent the transactions report back to "needs setting up".
+import paths as _P                                         # noqa: E402
+check("the report setup is kept in the data folder, not the program folder",
+      W.SELECTORS_PATH.parent == W.DATA and W.SELECTORS_PATH.parent != W.HERE, True)
+check("and a copy left in the program folder is moved there at start-up",
+      "selectors.json" in _P.OWNED, True)
 check("the transaction report still needs setup",
       W.report_ready("date-range-transactions")[0], False)
 check("it is driven, not recorded",

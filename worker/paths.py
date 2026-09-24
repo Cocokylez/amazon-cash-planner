@@ -57,6 +57,10 @@ OWNED = [
     "settings.json",
     "dataset.json",
     "supabase.json",
+    # How to run each report on THIS account's Seller Central pages, recorded
+    # once by "Set up". It lived beside the code, so every update erased it
+    # and the transactions report went back to "needs setting up".
+    "selectors.json",
 ]
 
 

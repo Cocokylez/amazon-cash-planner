@@ -85,7 +85,7 @@ function checkPackaged() {
     if (!fs.existsSync(path.join(res, f))) problems.push(f);
   }
   /* And the reverse: nothing of this computer's rode along. */
-  for (const f of ['config.json', 'supabase.json', 'claude.json', 'jobs.json', 'reports.db',
+  for (const f of ['config.json', 'supabase.json', 'claude.json', 'selectors.json', 'jobs.json', 'reports.db',
     'settings.json', 'dataset.json', 'profile', 'downloads', 'venv']) {
     if (fs.existsSync(path.join(res, 'app', 'worker', f))) problems.push('NOT ' + f + ' (it is private)');
   }

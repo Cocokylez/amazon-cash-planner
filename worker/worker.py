@@ -72,7 +72,9 @@ DOWNLOAD_DIR = DATA / "downloads"
 # Every report ever downloaded, in one file that outlives the CSV and
 # the browser that imported it. See archive.py for why it exists.
 ARCHIVE_DB = DATA / "reports.db"
-SELECTORS_PATH = HERE / "selectors.json"
+# In the data folder, not beside the code: an update replaces the program
+# folder, and the report setup recorded there was erased with it.
+SELECTORS_PATH = DATA / "selectors.json"
 # The parsed dataset the local app publishes here, which the MCP bridge serves
 # to an artifact. Financial figures only — never credentials.
 DATASET_PATH = DATA / "dataset.json"
@@ -81,7 +83,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.23"
+HELPER_VERSION = "4.9.24"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
