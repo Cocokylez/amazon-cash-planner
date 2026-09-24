@@ -95,8 +95,9 @@ function abandon(why) {
         + ' so it cannot become the latest one.');
     } catch (e2) {
       console.error('  COULD NOT remove ' + TAG + ': ' + e2.message
-        + '\n  Delete it by hand - while it exists and is empty, no '
-        + 'installed copy can update.');
+        + '\n  It is still a DRAFT, so nothing can see it and no installed '
+        + 'copy is affected. Delete it, or just publish again - a rerun '
+        + 'reuses the draft.');
     }
   } else {
     console.error('  ' + TAG + ' already existed, so it was left alone. '
