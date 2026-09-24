@@ -575,5 +575,28 @@ const H = require('../desktop/helper.js');
       /did not stop when asked[\s\S]{0,120}Nothing was forced/.test(main));
   }
 
+  /* The cloud-copy settings, and the first-launch setup window.
+
+     The settings used to be read once at startup, BEFORE the helper
+     connection existed: the read saw no helper, returned, and the panel
+     said "Not set up" about a project that was set up. Any failure was
+     swallowed the same way. These pin the order and the honesty. */
+  {
+    const fs4 = require('fs');
+    const app = fs4.readFileSync(require('path').join(__dirname, '..', 'lib', 'app.js'), 'utf8');
+    const boot = app.slice(app.indexOf('async function workerBoot'), app.indexOf('async function refreshJobs'));
+    T.ok('the settings are read after the helper is known, not before',
+      /state\.workerInfo = await[\s\S]*await loadMirror\(\)/.test(boot));
+    T.ok('nothing reads them on its own at startup any more', !/mirrorBoot\(\)/.test(app));
+    const load = app.slice(app.indexOf('async function loadMirror'), app.indexOf('function aboutPanel'));
+    T.ok('a failed read is retried', /setTimeout\(\(\) => loadMirror\(attempt \+ 1\)/.test(load));
+    T.ok('and ends as its own state, not as "not set up"', /mirrorLoad = 'failed'/.test(load));
+    T.ok('the panel says it could not check, rather than that nothing is there',
+      /Could not check/.test(app) && /not the same[\s\S]{0,20}as not being set up/.test(app));
+    T.ok('the setup window can always be skipped', /data-setupskip[\s\S]{0,200}Skip for now/.test(app));
+    T.ok('and a skipped setup stays visible on the Dashboard',
+      /state\.screen === 'dashboard' \? setupCard\(\)/.test(app));
+  }
+
   T.report();
 })();

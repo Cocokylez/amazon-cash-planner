@@ -537,6 +537,21 @@ details[open] > summary { margin-bottom: 10px; }
                     font-size: var(--t-meta); color: var(--claude); margin-bottom: 7px; }
 #scrim { position: fixed; inset: 0; background: rgba(23,43,77,.28); z-index: 55; }
 
+/* ── setup window ──────────────────────────────────────────────────────── */
+#setupmodal:empty { display: none; }
+.modal-scrim { position: fixed; inset: 0; background: rgba(23,43,77,.34); z-index: 70; }
+.modal { position: fixed; z-index: 71; left: 50%; top: 50%; transform: translate(-50%, -50%);
+         width: min(640px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto;
+         background: var(--surface); border-radius: var(--r-card); padding: 20px 24px 22px;
+         box-shadow: var(--shadow-lift); }
+.modal h2 { font-size: 20px; line-height: 1.35; }
+.modal-h { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.modal input { margin-bottom: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .modal { animation: modalin .18s ease-out; }
+}
+@keyframes modalin { from { opacity: 0; transform: translate(-50%, calc(-50% + 8px)); } }
+
 /* ── desktop ───────────────────────────────────────────────────────────── */
 @media (min-width: 1000px) {
   #shell { grid-template-columns: 252px 1fr; }
@@ -613,6 +628,9 @@ details[open] > summary { margin-bottom: 10px; }
 </div>
 
 <nav id="tabbar" aria-label="Sections"></nav>
+
+<!-- The first-launch setup window. Empty unless it is showing. -->
+<div id="setupmodal"></div>
 
 <aside id="ask" data-open="false" role="dialog" aria-modal="false" aria-labelledby="asktitle" hidden>
   <header>
