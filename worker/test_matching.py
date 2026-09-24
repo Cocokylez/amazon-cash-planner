@@ -1944,6 +1944,29 @@ check("and so are report figures",
 
 
 
+
+section("What the helper serves without a token")
+
+# The page, its scripts, and now its bundled fonts - each by exact folder and
+# extension. Everything else the helper holds (config.json with the token, the
+# Amazon profile, the downloads) must stay unreachable however the path is spelt.
+import worker as _WS                                       # noqa: E402
+_AD = _WS.APP_DIR
+_pub = lambda rel: _WS.is_public_file(rel, (_AD / rel).resolve())
+check("the app page is served", _pub("app.html"), True)
+check("its scripts are served", _pub("lib/app.js"), True)
+check("its bundled font is served", _pub("lib/fonts/inter-latin-wght-normal.woff2"), True)
+check("the font licence is not served as if it were a page asset",
+      _pub("lib/fonts/OFL.txt"), False)
+check("a script placed among the fonts is not served", _pub("lib/fonts/x.js"), False)
+check("a font outside the fonts folder is not served", _pub("lib/x.woff2"), False)
+check("the helper's own code is not served", _pub("worker/worker.py"), False)
+check("the token file is not served", _pub("worker/config.json"), False)
+check("nor by climbing out of the fonts folder",
+      _pub("lib/fonts/../../worker/config.json"), False)
+check("nor by climbing out of the app folder altogether",
+      _pub("lib/fonts/../../../x.woff2"), False)
+
 print("passed %d   failed %d" % (PASS, FAIL))
 if FAILURES:
     print("\nFAILURES")

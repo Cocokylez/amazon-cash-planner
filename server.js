@@ -11,7 +11,8 @@ http.createServer((req, res) => {
   let url;
   try { url = decodeURIComponent(req.url.split('?')[0]); }
   catch { res.writeHead(400).end('bad request'); return; }
-  const allowed = ['/', '/preview.html', '/app.html'].includes(url) || /^\/lib\/[a-z0-9-]+\.js$/.test(url);
+  const allowed = ['/', '/preview.html', '/app.html'].includes(url) || /^\/lib\/[a-z0-9-]+\.js$/.test(url)
+    || /^\/lib\/fonts\/[a-z0-9-]+\.woff2$/.test(url);
   if (!allowed) { res.writeHead(404).end('not found'); return; }
   const file = path.join(ROOT, url === '/' ? 'preview.html' : url);
   fs.readFile(file, (err, buf) => {

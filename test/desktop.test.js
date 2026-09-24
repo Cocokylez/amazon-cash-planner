@@ -598,5 +598,23 @@ const H = require('../desktop/helper.js');
       /state\.screen === 'dashboard' \? setupCard\(\)/.test(app));
   }
 
+  /* The page loads nothing from anywhere else.
+
+     The font used to come from Google Fonts on every launch - a request that
+     told a third party each time the app opened, and failed offline. It is
+     bundled now; this keeps any remote resource from creeping back in. */
+  {
+    const fs5 = require('fs');
+    const p5 = (...a) => require('path').join(__dirname, '..', ...a);
+    const html = fs5.readFileSync(p5('app.html'), 'utf8');
+    const remote = html.match(/<(?:link|script|img|iframe)[^>]+(?:href|src)=["']https?:\/\/[^"']+/gi) || [];
+    T.eq('the page references no remote stylesheet, script or image', remote, []);
+    T.ok('nor any remote font', !/url\(\s*["']?https?:/i.test(html));
+    const faces = [...html.matchAll(/url\("(lib\/fonts\/[^"]+)"\)/g)].map(m => m[1]);
+    T.ok('every bundled font the page names exists',
+      faces.length > 0 && faces.every(f => fs5.existsSync(p5(f))));
+    T.ok('and the font licence ships beside them', fs5.existsSync(p5('lib', 'fonts', 'OFL.txt')));
+  }
+
   T.report();
 })();

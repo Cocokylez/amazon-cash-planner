@@ -144,6 +144,26 @@ TYPES = {
     ".woff2": "font/woff2",
 }
 
+def is_public_file(rel: str, target: Path) -> bool:
+    """What the helper will serve without a token: the app page, its scripts,
+    and its bundled fonts. Each by exact folder and exact extension, and only
+    inside the app folder - so no path, however it is spelt, reaches the
+    worker folder, config.json, the profile or the downloads."""
+    try:
+        if not target.is_relative_to(APP_DIR):
+            return False
+    except Exception:
+        return False
+    if rel == 'app.html':
+        return True
+    if rel.startswith('lib/') and target.suffix == '.js' and target.parent == APP_DIR / 'lib':
+        return True
+    if (rel.startswith('lib/fonts/') and target.suffix == '.woff2'
+            and target.parent == APP_DIR / 'lib' / 'fonts'):
+        return True
+    return False
+
+
 STATUSES = [
     "queued", "login-required", "requesting", "generating",
     "downloading", "validating", "importing", "complete", "failed", "cancelled",
@@ -978,8 +998,7 @@ class Handler(BaseHTTPRequestHandler):
         # -- static: the app itself, same origin as the API ------------------
         rel = "app.html" if path in ("/", "") else path.lstrip("/")
         target = (APP_DIR / rel).resolve()
-        public = rel == 'app.html' or (rel.startswith('lib/') and target.suffix == '.js' and target.parent == APP_DIR / 'lib')
-        if not public or not target.is_relative_to(APP_DIR) or not target.is_file():
+        if not is_public_file(rel, target) or not target.is_file():
             self.send_response(404)
             self.end_headers()
             self.wfile.write(b"not found")
