@@ -273,6 +273,75 @@ function keepCheckingForUpdates() {
   if (recheckTimer.unref) recheckTimer.unref();
 }
 
+/* ── Ask Claude ─────────────────────────────────────────────────────────── */
+
+/* The key is encrypted for this Windows account by safeStorage and kept in
+   the data folder; it never crosses to the page. Only the app window may
+   ask, and only while it is showing the local app - a page that navigated
+   anywhere else gets nothing. One question at a time: two in flight would
+   spend twice for one screen. */
+const Claude = require('./claude.js');
+let claudeSdk;
+const sdk = () => (claudeSdk === undefined ? (claudeSdk = Claude.loadSdk()) : claudeSdk);
+let claudeBusy = false;
+
+function claudeStore() {
+  const { safeStorage } = require('electron');
+  return Claude.keyStore({
+    file: path.join(H.dataDir(), 'claude.json'),
+    crypto: {
+      available: () => safeStorage.isEncryptionAvailable(),
+      encrypt: s => safeStorage.encryptString(s),
+      decrypt: b => safeStorage.decryptString(b),
+    },
+  });
+}
+
+function fromAppWindow(event) {
+  if (!appWindow || appWindow.isDestroyed() || event.sender !== appWindow.webContents) return false;
+  try {
+    const u = new URL(event.senderFrame ? event.senderFrame.url : event.sender.getURL());
+    return u.hostname === '127.0.0.1' || u.hostname === 'localhost';
+  } catch (e) { return false; }
+}
+const refused = { ok: false, code: 'not_allowed', error: 'Only the app window can use Claude.' };
+
+ipcMain.handle('claude:status', event => {
+  if (!fromAppWindow(event)) return refused;
+  return Claude.status(claudeStore(), sdk());
+});
+ipcMain.handle('claude:connect', async (event, key) => {
+  if (!fromAppWindow(event)) return refused;
+  const r = await Claude.connect(claudeStore(), key, sdk());
+  logLine('claude: connect ' + (r.ok ? 'ok' : 'refused (' + r.code + ')'));
+  return r;
+});
+ipcMain.handle('claude:forget', event => {
+  if (!fromAppWindow(event)) return refused;
+  const gone = claudeStore().forget();
+  logLine('claude: key removed');
+  return Object.assign({ ok: true, forgotten: gone }, Claude.status(claudeStore(), sdk()));
+});
+ipcMain.handle('claude:ask', async (event, req) => {
+  if (!fromAppWindow(event)) return refused;
+  if (claudeBusy) return { ok: false, code: 'busy', error: 'Claude is still answering the last question.' };
+  claudeBusy = true;
+  const id = req && typeof req.id === 'string' ? req.id.slice(0, 40) : '';
+  try {
+    const r = await Claude.ask(claudeStore(), req, sdk(), text => {
+      if (!event.sender.isDestroyed()) event.sender.send('claude:delta', { id, text });
+    });
+    /* Counts only - never the question, the figures or the answer. */
+    logLine('claude: ' + (r.ok ? 'answered' : 'failed (' + r.code + ')')
+      + (r.usage ? ' ' + r.usage.input + ' in / ' + r.usage.output + ' out'
+        + (r.usage.cacheRead ? ' / ' + r.usage.cacheRead + ' cached' : '') : '')
+      + (r.fellBack ? ' / answered by the fallback model' : ''));
+    return r;
+  } finally {
+    claudeBusy = false;
+  }
+});
+
 ipcMain.handle('shell:run-setup', () => { runSetup(); return true; });
 ipcMain.handle('shell:open-python', () => {
   shell.openExternal('https://www.python.org/downloads/');

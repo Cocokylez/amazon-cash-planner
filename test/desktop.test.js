@@ -662,5 +662,30 @@ const H = require('../desktop/helper.js');
     T.ok('forecast-only profit matches costs by MSKU', !/\[c\.sku, c\]/.test(app));
   }
 
+  /* Ask Claude. The rules and the network call are tested in claude.test.js;
+     these check the boundary: the key stays in the shell, and only the app
+     window can reach it. */
+  {
+    const fs8 = require('fs');
+    const p8 = (...a) => require('path').join(__dirname, '..', ...a);
+    const pre = fs8.readFileSync(p8('desktop', 'app-preload.js'), 'utf8');
+    const main = fs8.readFileSync(p8('desktop', 'main.js'), 'utf8');
+    const app = fs8.readFileSync(p8('lib', 'app.js'), 'utf8');
+    const pkg = JSON.parse(fs8.readFileSync(p8('package.json'), 'utf8'));
+    T.ok('the SDK ships with the app, pinned', /^\d+\.\d+\.\d+$/.test((pkg.dependencies || {})['@anthropic-ai/sdk'] || ''));
+    const exposed = (pre.match(/claude:\s*\{([\s\S]*?)\n  \},/) || [, ''])[1];
+    T.eq('the page gets four things and no getter for the key',
+      (exposed.match(/^\s{4}(\w+)[:(]/gm) || []).map(s => s.trim().replace(/[:(]$/, '')).join(','),
+      'status,connect,forget,ask');
+    for (const ch of ['claude:status', 'claude:connect', 'claude:forget', 'claude:ask']) {
+      const at = main.indexOf("ipcMain.handle('" + ch + "'");
+      T.ok(ch + ' answers only the app window', at > 0 && /fromAppWindow\(event\)/.test(main.slice(at, at + 200)));
+    }
+    T.ok('the key is encrypted by safeStorage', /safeStorage\.encryptString/.test(main));
+    T.ok('the shell log records counts, never the question or answer',
+      !/logLine\([^)]*(question|brief|r\.text)/.test(main));
+    T.ok('the page asks the shell before anything else', /const dc = desktopClaude\(\);\s*if \(dc\)/.test(app));
+  }
+
   T.report();
 })();
