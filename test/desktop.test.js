@@ -745,6 +745,21 @@ const H = require('../desktop/helper.js');
       && !/state\.filters\.to \|\| CSV\.addDays\(state\.today, 13\)/.test(app));
   }
 
+  /* The same file downloaded twice: counted once, belonging to both, and
+     never taken away by deleting one of them. */
+  {
+    const fs13 = require('fs');
+    const app = fs13.readFileSync(require('path').join(__dirname, '..', 'lib', 'app.js'), 'utf8');
+    T.ok('an import remembers every download that delivered it',
+      /rec\.jobIds = \[\.\.\.new Set/.test(app) && !/rec\.jobId = j\.jobId;/.test(app));
+    T.ok('so an earlier download is not imported again on every refresh',
+      /Array\.isArray\(r\.jobIds\) && r\.jobIds\.indexOf\(id\) >= 0/.test(app));
+    T.ok('a repeat download reports the rows already there, not "None of None"',
+      /sameAs: rec\.name/.test(app));
+    T.ok('deleting one of two downloads of the same file keeps its figures',
+      /imp && !keepFigures \? removeImport\(imp\.id\)/.test(app));
+  }
+
   /* "Today", and the periods built on it. */
   {
     const fs10 = require('fs');

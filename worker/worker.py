@@ -83,7 +83,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.26"
+HELPER_VERSION = "4.9.27"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -661,6 +661,25 @@ def range_for(report_type: str, today: date | None = None) -> tuple[str, str]:
         start = t + timedelta(days=1)
         return start.isoformat(), (start + timedelta(days=spec["aheadDays"] - 1)).isoformat()
     return (t - timedelta(days=spec["backDays"])).isoformat(), t.isoformat()
+
+
+def imported_words(payload: dict) -> str:
+    """What an import did, in words - never "Imported None of None rows".
+
+    A download identical to one already in the app adds nothing; that is
+    said as it is, with the rows the app already holds, so it cannot be read
+    as the data having gone back to zero.
+    """
+    p = payload or {}
+    got, seen = p.get("rowsAccepted"), p.get("rowsProcessed")
+    if p.get("sameAs"):
+        return ("Same file as %s, already in the app%s - nothing new to add."
+                % (str(p["sameAs"])[:80], "" if got is None else " (%s rows)" % got))
+    if got is None:
+        return "Imported."
+    if seen is None or seen == got:
+        return "Imported %s rows." % got
+    return "Imported %s of %s rows." % (got, seen)
 
 
 def history_window(dfrom: str, dto: str, today: date | None = None) -> tuple[str, str] | None:
@@ -1618,8 +1637,7 @@ class Handler(BaseHTTPRequestHandler):
             upd = JOBS.update(
                 job_id, status="complete", finishedAt=now(), lastError=None,
                 rowCount=payload.get("rowsAccepted"),
-                statusDetail="Imported %s of %s rows." % (
-                    payload.get("rowsAccepted"), payload.get("rowsProcessed")))
+                statusDetail=imported_words(payload))
             return self._json(upd or {"error": "not found"},
                               200 if upd else 404)
 

@@ -561,6 +561,17 @@ _hf, _ht = W.range_for("date-range-transactions", _t)
 check("a HISTORICAL window still ends today", _ht, "2026-09-22")
 check("and looks backwards", _hf < _ht, True)
 
+# What an import says it did. Never "Imported None of None rows".
+check("a normal import", W.imported_words({"rowsAccepted": 209, "rowsProcessed": 209}),
+      "Imported 209 rows.")
+check("some rows refused", W.imported_words({"rowsAccepted": 200, "rowsProcessed": 209}),
+      "Imported 200 of 209 rows.")
+check("the same file again says so, with the rows already there",
+      W.imported_words({"sameAs": "preview.csv", "rowsAccepted": 209}),
+      "Same file as preview.csv, already in the app (209 rows) - nothing new to add.")
+check("no counts at all is still words, not None",
+      "None" in W.imported_words({}), False)
+
 # The period on screen is only borrowed by a history report when it has
 # happened. "Next 8 weeks" is not a period anyone can have transactions for.
 check("a past period is used as it is",
