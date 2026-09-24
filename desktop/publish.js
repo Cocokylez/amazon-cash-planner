@@ -41,11 +41,70 @@ function sha512Base64(file) {
 /* readdirSync on a folder that is not there throws before the check below
    ever runs, turning "you forgot to build" into a stack trace about scandir.
    The advice was already written; it just needed to be reachable. */
-const built = (fs.existsSync(OUT) ? fs.readdirSync(OUT) : [])
-  .find(f => f.startsWith('Amazon Cash Planner Setup ') && f.endsWith('.exe'));
-if (!built) {
-  console.error('\n  No installer in dist-desktop. Run the build first.\n');
+/* THIS version's installer, by exact name. "The first Setup .exe in the
+   folder" could be one left from the last build - and uploading it under the
+   new version number would hand every installed copy the old app, labelled
+   as the new one. */
+const built = 'Amazon Cash Planner Setup ' + pkg.version + '.exe';
+if (!fs.existsSync(path.join(OUT, built))) {
+  console.error('\n  No installer for ' + pkg.version + ' in dist-desktop. Run the build '
+    + 'first.\n');
   process.exit(1);
+}
+
+/* What is INSIDE, checked before anything is published. Each of these is
+   something the installed app reaches for; a build that quietly lost one
+   would install cleanly and then fail in front of someone. */
+function checkPackaged() {
+  const res = path.join(OUT, 'win-unpacked', 'resources');
+  const asarFile = path.join(res, 'app.asar');
+  if (!fs.existsSync(asarFile)) return ['resources/app.asar'];
+  let inside;
+  try {
+    inside = new Set(require('@electron/asar').listPackage(asarFile)
+      .map(p => p.replace(/\\/g, '/').replace(/^\//, '')));
+  } catch (e) {
+    return ['a readable app.asar (' + e.message + ')'];
+  }
+  const problems = [
+    'package.json', 'app.html',
+    'desktop/main.js', 'desktop/helper.js', 'desktop/app-preload.js', 'desktop/claude.js',
+    'lib/app.js', 'lib/inputs.js', 'lib/sync.js', 'lib/worker.js',
+    'lib/fonts/inter-latin-wght-normal.woff2', 'lib/fonts/OFL.txt',
+    'node_modules/@anthropic-ai/sdk/package.json',
+    'node_modules/electron-updater/package.json',
+  ].filter(f => !inside.has(f));
+  for (const f of ['app/worker/worker.py', 'app/worker/supabase.py', 'app/worker/secretbox.py',
+    'app/worker/archive.py', 'app/worker/paths.py', 'app/worker/launch.py',
+    'app/worker/install.py', 'app/worker/requirements.txt',
+    'app/lib/app.js', 'app/lib/inputs.js', 'app/app.html']) {
+    if (!fs.existsSync(path.join(res, f))) problems.push(f);
+  }
+  /* And the reverse: nothing of this computer's rode along. */
+  for (const f of ['config.json', 'supabase.json', 'claude.json', 'jobs.json', 'reports.db',
+    'settings.json', 'dataset.json', 'profile', 'downloads', 'venv']) {
+    if (fs.existsSync(path.join(res, 'app', 'worker', f))) problems.push('NOT ' + f + ' (it is private)');
+  }
+  /* The version inside is the version being published. */
+  try {
+    const packed = JSON.parse(require('@electron/asar').extractFile(asarFile, 'package.json').toString('utf8'));
+    if (packed.version !== pkg.version) problems.push('version ' + pkg.version + ' (it says ' + packed.version + ')');
+  } catch (e) { problems.push('a readable package.json inside'); }
+  const wp = path.join(res, 'app', 'worker', 'worker.py');
+  if (fs.existsSync(wp) && !fs.readFileSync(wp, 'utf8').includes('HELPER_VERSION = "' + pkg.version + '"')) {
+    problems.push('the helper at ' + pkg.version + ' (worker.py says otherwise)');
+  }
+  return problems;
+}
+{
+  const problems = checkPackaged();
+  if (problems.length) {
+    console.error('\n  The build is not ready to publish. It is missing or wrong:\n    '
+      + problems.join('\n    ') + '\n  Nothing was published.\n');
+    process.exit(1);
+  }
+  console.log('  packaged app checked: everything it needs, nothing private, version '
+    + pkg.version);
 }
 const asset = built.replace(/ /g, '-');
 fs.copyFileSync(path.join(OUT, built), path.join(OUT, asset));
