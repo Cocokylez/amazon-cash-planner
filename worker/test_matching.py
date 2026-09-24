@@ -1527,8 +1527,12 @@ check("forgetting twice is not an error", SB.forget(_mh), False)
 
 # The schema locks the tables by default: an open table holding somebody's fee
 # data is not a state to pass through on the way to getting policies right.
-check("row level security is on in the schema",
-      SB.SCHEMA_SQL.count("enable row level security"), 2)
+import re as _re_rls                                       # noqa: E402
+check("row level security is on for every table in the schema",
+      sorted(_re_rls.findall(r"alter table (\w+) enable row level security", SB.SCHEMA_SQL)),
+      sorted(_re_rls.findall(r"create table if not exists (\w+)", SB.SCHEMA_SQL)))
+check("and no policy opens any of them",
+      "create policy" in SB.SCHEMA_SQL.lower(), False)
 check("and money is scaled integers, not floats",
       "net_sales_scaled  bigint" in SB.SCHEMA_SQL, True)
 
@@ -2114,6 +2118,122 @@ check("a failing sync never raises, and is counted", _bad.failures, 2)
 check("the failure is reported plainly", "down" in _bad.last["detail"], True)
 
 _ms.shutdown()
+
+
+section("Your figures on another computer: the document store")
+
+import tempfile as _tD                                    # noqa: E402
+import threading as _thD                                  # noqa: E402
+from http.server import BaseHTTPRequestHandler as _BHD, HTTPServer as _HSD  # noqa: E402
+from urllib.parse import urlparse as _upD, parse_qs as _pqD  # noqa: E402
+
+
+class _Docs(_BHD):
+    """app_docs, as PostgREST serves it."""
+    store = {}
+    keys = []
+    mode = "ok"
+
+    def _p(self):
+        q = _pqD(_upD(self.path).query)
+        return (q.get("doc_path") or [""])[0].replace("eq.", "", 1)
+
+    def _send(self, code, body=b""):
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _gate(self):
+        _Docs.keys.append(self.headers.get("apikey") or "")
+        if _Docs.mode == "missing":
+            self._send(404, b'{"code":"PGRST205","message":"Could not find the table public.app_docs"}')
+            return False
+        if _Docs.mode == "busy":
+            self._send(503, b'{}')
+            return False
+        return True
+
+    def do_GET(self):
+        if not self._gate():
+            return
+        p = self._p()
+        rows = [{"data": _Docs.store[p]}] if p in _Docs.store else []
+        self._send(200, json.dumps(rows).encode())
+
+    def do_POST(self):
+        n = int(self.headers.get("content-length") or 0)
+        rows = json.loads(self.rfile.read(n).decode("utf-8"))
+        if not self._gate():
+            return
+        for r in rows:
+            _Docs.store[r["doc_path"]] = r["data"]
+        self._send(201)
+
+    def do_DELETE(self):
+        if not self._gate():
+            return
+        _Docs.store.pop(self._p(), None)
+        self._send(204)
+
+    def log_message(self, *a):
+        pass
+
+
+_ds = _HSD(("127.0.0.1", 0), _Docs)
+_thD.Thread(target=_ds.serve_forever, daemon=True).start()
+_dh = Path(_tD.mkdtemp())
+(_dh / "supabase.json").write_text(json.dumps({
+    "url": "http://127.0.0.1:%d" % _ds.server_address[1],
+    "key": "sb_publishable_" + "x" * 30}), encoding="utf-8")
+
+_st = "data/users/owner/state"
+_ck = "data/users/owner/blobs/imp-abc_1.csv/c0"
+try:
+    SB.doc_get(_dh, _st)
+    check("without the secret key nothing is read", "no error", "an error")
+except SB.DocError as _e:
+    check("without the secret key nothing is read", _e.code, "not_ready")
+
+(_dh / "supabase.json").write_text(json.dumps({
+    "url": "http://127.0.0.1:%d" % _ds.server_address[1],
+    "key": "sb_publishable_" + "x" * 30, "writeKey": "sb_secret_" + "y" * 30}), encoding="utf-8")
+check("a document not there yet reads as nothing", SB.doc_get(_dh, _st), None)
+SB.doc_set(_dh, _st, {"rev": 1, "payload": "{}"})
+check("a saved document reads back", SB.doc_get(_dh, _st), {"rev": 1, "payload": "{}"})
+SB.doc_set(_dh, _ck, {"d": "x" * 1000, "i": 0, "of": 1})
+check("a chunk of an imported file is stored under its own path", SB.doc_get(_dh, _ck)["of"], 1)
+SB.doc_delete(_dh, _ck)
+check("and can be removed", SB.doc_get(_dh, _ck), None)
+check("every request used the secret key", set(_Docs.keys), {"sb_secret_" + "y" * 30})
+
+for _bad in ["data/users/owner/../../etc", "data/users/someone/state", "reports", "",
+             "data/users/owner/blobs/a/b/c0", "data/users/owner/state?x=1"]:
+    try:
+        SB.doc_get(_dh, _bad)
+        check("refused before any request: %r" % _bad, "sent", "refused")
+    except SB.DocError as _e:
+        check("refused before any request: %r" % _bad, _e.code, "bad_path")
+try:
+    SB.doc_set(_dh, _st, {"d": "x" * (SB.DOC_MAX_BYTES + 10)})
+    check("an oversized document is refused", "sent", "refused")
+except SB.DocError as _e:
+    check("an oversized document is refused", _e.code, "too_large")
+
+_Docs.mode = "missing"
+check("a project without the table says which SQL to run",
+      SB.docs_status(_dh)["code"] if SB.docs_status(_dh).get("ready") is False else "ready", "not_ready")
+check("in words that name the table", "app_docs" in SB.docs_status(_dh)["detail"], True)
+_Docs.mode = "busy"
+try:
+    SB.doc_get(_dh, _st)
+    check("a busy project is retryable, not fatal", "ok", "unavailable")
+except SB.DocError as _e:
+    check("a busy project is retryable, not fatal", _e.code, "unavailable")
+_Docs.mode = "ok"
+check("and ready once it answers", SB.docs_status(_dh)["ready"], True)
+_ds.shutdown()
 
 print("passed %d   failed %d" % (PASS, FAIL))
 if FAILURES:

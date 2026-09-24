@@ -687,5 +687,22 @@ const H = require('../desktop/helper.js');
     T.ok('the page asks the shell before anything else', /const dc = desktopClaude\(\);\s*if \(dc\)/.test(app));
   }
 
+  /* Your figures on your other computers. Only ever through the helper's
+     locked table - never the artifact store that had no server-side access
+     control - and only once the project itself says it is ready. */
+  {
+    const fs9 = require('fs');
+    const p9 = (...a) => require('path').join(__dirname, '..', ...a);
+    const app = fs9.readFileSync(p9('lib', 'app.js'), 'utf8');
+    const sync = fs9.readFileSync(p9('lib', 'sync.js'), 'utf8');
+    const creates = app.match(/Sync\.create\(\{[\s\S]{0,80}/g) || [];
+    T.ok('every sync the app starts writes through the helper',
+      creates.length > 0 && creates.every(c => /use: Sync\.helperStore\(state\.worker\)/.test(c)));
+    T.ok('sync never falls back to the artifact store', !/globalThis\.claude\.use/.test(sync));
+    T.ok('it starts only after the project answers ready',
+      /cloudStatus\(\)[\s\S]{0,400}if \(!st \|\| !st\.ready\)/.test(app));
+    T.ok('disconnecting stops it', (app.match(/stopCloudSync\(\)/g) || []).length >= 2);
+  }
+
   T.report();
 })();

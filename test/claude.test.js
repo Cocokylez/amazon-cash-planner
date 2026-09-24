@@ -156,6 +156,9 @@ const server = http.createServer((req, res) => {
   const after = await C.ask(store, { brief: 'x', question: 'q' }, sdk, null, opts);
   T.ok('and nothing can be asked until a key is connected again', after.code === 'not_connected');
 
-  server.close();
-  process.exit(T.report() ? 0 : 1);
-})().catch(e => { console.error(e); process.exit(1); });
+  /* Closed properly and left to exit on its own: process.exit() with the
+     SDK's keep-alive sockets still closing crashes Node on Windows. */
+  server.closeAllConnections();
+  await new Promise(r => server.close(r));
+  process.exitCode = T.report() ? 0 : 1;
+})().catch(e => { console.error(e); process.exitCode = 1; server.closeAllConnections(); server.close(); });

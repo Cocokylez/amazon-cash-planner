@@ -1007,6 +1007,19 @@ class Handler(BaseHTTPRequestHandler):
                 out["auto"] = MIRROR_SYNC.status()
                 return self._json(out)
 
+            # Your figures on another computer: one document at a time, only
+            # the paths the app's sync writes, only with the secret key.
+            if path == "/api/cloud":
+                return self._json(supabase.docs_status(DATA))
+            if path == "/api/cloud/doc":
+                qs = parse_qs(parsed.query)
+                try:
+                    data = supabase.doc_get(DATA, (qs.get("path") or [""])[0])
+                except supabase.DocError as exc:
+                    return self._json({"error": str(exc), "code": exc.code},
+                                      400 if exc.code == "bad_path" else 502)
+                return self._json({"exists": data is not None, "data": data})
+
             if path == "/api/jobs":
                 return self._json({"jobs": JOBS.list()})
 
@@ -1362,6 +1375,17 @@ class Handler(BaseHTTPRequestHandler):
                            "connection is kept, but nothing will be sent "
                            "until it is added again.")
             return self._json(out)
+
+        if parsed.path in ("/api/cloud/doc", "/api/cloud/doc/delete"):
+            try:
+                if parsed.path.endswith("/delete"):
+                    supabase.doc_delete(DATA, payload.get("path"))
+                else:
+                    supabase.doc_set(DATA, payload.get("path"), payload.get("data"))
+            except supabase.DocError as exc:
+                return self._json({"error": str(exc), "code": exc.code},
+                                  400 if exc.code in ("bad_path", "too_large") else 502)
+            return self._json({"ok": True})
 
         if parsed.path == "/api/supabase/auto":
             out = supabase.set_auto_push(DATA, bool(payload.get("enabled")))

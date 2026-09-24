@@ -552,6 +552,17 @@ create index if not exists report_rows_report on report_rows (report_id);
 -- the way to getting the policies right.
 alter table reports enable row level security;
 alter table report_rows enable row level security;
+
+-- Your figures on your other computers: the app's settings, balances and
+-- entries, and its imported files in pieces. Locked the same way - RLS on,
+-- no policy - so only a computer holding this project's secret key can read
+-- or write it. Safe to run again: nothing here replaces what exists.
+create table if not exists app_docs (
+  doc_path    text primary key,
+  data        jsonb not null,
+  updated_at  timestamptz not null default now()
+);
+alter table app_docs enable row level security;
 """
 # ---------------------------------------------------------------------------
 # The push itself.
@@ -837,3 +848,128 @@ def sync(here: Path, db_path: Path, archive=None, log=None) -> dict:
         result["detail"] = ("Removed %d deleted report%s from the mirror. "
                             % (deleted, "" if deleted == 1 else "s")) + result["detail"]
     return result
+
+
+# ---------------------------------------------------------------------------
+# Your figures on another computer: a small document store in app_docs.
+#
+# The app's sync module (lib/sync.js) already knows how to save its state and
+# its imported files as documents and chunks, merge two devices, and refuse a
+# save that would overwrite another device's. What it lacked was somewhere to
+# put them that is actually private. This is that: one table, locked by Row
+# Level Security with no policy, reached only with this project's secret key -
+# which never leaves the helper. Access is enforced by Supabase, not by a
+# path name.
+# ---------------------------------------------------------------------------
+
+# Exactly the paths lib/sync.js writes, for the one owner of this project.
+# Anything else is refused before a request is made.
+DOC_PATH = re.compile(
+    r"^data/users/owner/(state|blobs(/[A-Za-z0-9_\-.~:@+]{1,180}/c\d{1,4})?)$")
+DOC_MAX_BYTES = 400 * 1024
+
+
+class DocError(Exception):
+    """code: not_ready | unavailable | refused | bad_path | too_large"""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _doc_creds(here: Path) -> tuple[str, str]:
+    creds = _write_secret(here)
+    if not creds or not load(here).get("configured"):
+        raise DocError("not_ready", "Syncing needs this project connected with its "
+                                    "secret key on this computer.")
+    return creds
+
+
+def _doc_call(url: str, key: str, method: str, query: str, body=None, prefer=None):
+    headers = dict(_headers(key, is_jwt(key)))
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    if prefer:
+        headers["Prefer"] = prefer
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    req = urllib.request.Request(url.rstrip("/") + "/rest/v1/app_docs" + query,
+                                 data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=PUSH_TIMEOUT_S) as res:
+            return res.status, res.read(DOC_MAX_BYTES * 2 + 1024).decode("utf-8", "replace")
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read(1000).decode("utf-8", "replace")
+        except Exception:
+            pass
+        low = detail.lower()
+        if exc.code == 404 or "pgrst205" in low or "does not exist" in low:
+            raise DocError("not_ready", "The project has no app_docs table yet. Copy the "
+                                        "setup SQL from this panel again and run it in "
+                                        "Supabase > SQL Editor - it adds the table and "
+                                        "changes nothing that exists.")
+        if exc.code in (401, 403) or "42501" in low or "row-level security" in low:
+            raise DocError("refused", "The project refused this computer's secret key "
+                                      "(%d). Add the write key again." % exc.code)
+        if exc.code >= 500 or exc.code == 429:
+            raise DocError("unavailable", "Supabase is busy (%d). The next save will "
+                                          "pick this up." % exc.code)
+        raise DocError("refused", "Supabase refused the request (%d). %s"
+                       % (exc.code, detail[:160]))
+    except urllib.error.URLError as exc:
+        raise DocError("unavailable", "Could not reach the project (%s)."
+                       % str(getattr(exc, "reason", exc))[:120])
+
+
+def _doc_q(path: str) -> str:
+    from urllib.parse import quote
+    if not isinstance(path, str) or not DOC_PATH.match(path):
+        raise DocError("bad_path", "Not a path this app stores.")
+    return "?doc_path=eq." + quote(path, safe="")
+
+
+def doc_get(here: Path, path: str):
+    """The document's data, or None when there is none."""
+    q = _doc_q(path)
+    url, key = _doc_creds(here)
+    _status, text = _doc_call(url, key, "GET", q + "&select=data")
+    try:
+        rows = json.loads(text or "[]")
+    except Exception:
+        raise DocError("unavailable", "The project answered with something that is not data.")
+    return rows[0]["data"] if rows else None
+
+
+def doc_set(here: Path, path: str, data) -> None:
+    q = _doc_q(path)
+    if not isinstance(data, dict):
+        raise DocError("bad_path", "A document is an object.")
+    if len(json.dumps(data)) > DOC_MAX_BYTES:
+        raise DocError("too_large", "That document is larger than one save can hold.")
+    url, key = _doc_creds(here)
+    from datetime import datetime, timezone
+    _doc_call(url, key, "POST", "", body=[{
+        "doc_path": path, "data": data,
+        "updated_at": datetime.now(timezone.utc).isoformat()}],
+        prefer="resolution=merge-duplicates,return=minimal")
+
+
+def doc_delete(here: Path, path: str) -> None:
+    q = _doc_q(path)
+    url, key = _doc_creds(here)
+    _doc_call(url, key, "DELETE", q, prefer="return=minimal")
+
+
+def docs_status(here: Path) -> dict:
+    """Is syncing possible from this computer, right now? Asked of the
+    project, not assumed from the settings."""
+    m = load(here)
+    if not (m.get("configured") and m.get("canWrite")):
+        return {"ready": False, "code": "not_ready",
+                "detail": "Connect the project and add its secret key on this computer."}
+    try:
+        doc_get(here, "data/users/owner/state")
+        return {"ready": True, "detail": "The project holds your synced figures."}
+    except DocError as exc:
+        return {"ready": False, "code": exc.code, "detail": str(exc)}

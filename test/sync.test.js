@@ -318,7 +318,7 @@ T.section('Blob keys are legal path segments');
     T.eq('with no platform at all, connect fails', await offline.connect(), false);
     T.eq('and the status says unavailable', offline.state.status, 'unavailable');
     T.ok('with a reason a person can act on',
-      /outside claude\.ai/.test(offline.state.reason), offline.state.reason);
+      /No place to sync to is set up/.test(offline.state.reason), offline.state.reason);
 
     const noDb = Sync.create({ use: async n => (n === 'user' ? fakeUser('u') : null) });
     T.eq('db missing also fails', await noDb.connect(), false);
@@ -342,6 +342,59 @@ T.section('Blob keys are legal path segments');
       paths.every(p => p.indexOf('data/users/user-42/') === 0), paths.join(' '));
     T.ok('and nothing was written to a shared location',
       !paths.some(p => p.indexOf('data/users/user-42/') !== 0), paths.join(' '));
+  }
+
+  T.section('Two computers, through the helper, into one Supabase project');
+  {
+    /* The helper's routes, as a stand-in: a map keyed by path, with the same
+       path rule the helper enforces (worker/supabase.py DOC_PATH). */
+    const DOC_PATH = /^data\/users\/owner\/(state|blobs(\/[A-Za-z0-9_\-.~:@+]{1,180}\/c\d{1,4})?)$/;
+    const table = new Map();
+    const refused = [];
+    const helper = {
+      async cloudGet(p) {
+        if (!DOC_PATH.test(p)) { refused.push(p); const e = new Error('bad'); e.payload = { code: 'bad_path' }; throw e; }
+        return table.has(p) ? { exists: true, data: JSON.parse(table.get(p)) } : { exists: false, data: null };
+      },
+      async cloudSet(p, data) {
+        if (!DOC_PATH.test(p)) { refused.push(p); const e = new Error('bad'); e.payload = { code: 'bad_path' }; throw e; }
+        table.set(p, JSON.stringify(data));
+      },
+      async cloudDelete(p) { table.delete(p); },
+    };
+    const office = Sync.create({ use: Sync.helperStore(helper) });
+    const laptop = Sync.create({ use: Sync.helperStore(helper) });
+    T.ok('the office computer connects', await office.connect());
+    await office.pushState({ imports: [{ id: 'i1', name: 'payments.csv', contentHash: 'h1' }],
+      balanceSnapshots: [{ id: 'b1', available: 820000 }], policy: { cooldownDays: 1 } });
+    const bigLedger = { rows: 'x'.repeat(Sync.CHUNK * 2 + 10) };
+    await office.putBlob('imp-i1', bigLedger, { kind: 'ledger', name: 'payments.csv' });
+    T.eq('every path it wrote is one the helper accepts', refused.length, 0);
+    T.ok('the file went up in pieces', [...table.keys()].filter(k => /\/c\d+$/.test(k)).length === 3);
+
+    T.ok('the laptop connects to the same project', await laptop.connect());
+    const got = await laptop.pullState();
+    T.eq('it reads the office computer’s balances', got.payload.balanceSnapshots[0].available, 820000);
+    T.eq('and its settings', got.payload.policy.cooldownDays, 1);
+    const back = await laptop.getBlob('imp-i1');
+    T.eq('and the imported file, whole', back && back.rows.length, bigLedger.rows.length);
+
+    /* Both edit; the second to save is stopped, not allowed to overwrite. */
+    laptop.setBaseRev(got.rev);
+    office.setBaseRev(got.rev);
+    await office.pushState({ imports: [], policy: { cooldownDays: 2 } });
+    let stopped = null;
+    try { await laptop.pushState({ imports: [], policy: { cooldownDays: 3 } }); }
+    catch (e) { stopped = e.code; }
+    T.eq('a stale save from the other computer is refused, not written', stopped, 'conflict');
+    T.eq('and the office computer’s change stands', (await laptop.pullState()).payload.policy.cooldownDays, 2);
+
+    const down = Sync.create({ use: Sync.helperStore({
+      cloudGet: async () => { const e = new Error('busy'); e.payload = { code: 'unavailable' }; throw e; } }) });
+    await down.connect();
+    let code = null;
+    try { await down.pullState(); } catch (e) { code = e.code; }
+    T.eq('a busy project keeps the helper’s code, so it is retried once and reported', code, 'unavailable');
   }
 
   process.exit(T.report() ? 0 : 1);
