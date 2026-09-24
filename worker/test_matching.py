@@ -1967,6 +1967,154 @@ check("nor by climbing out of the fonts folder",
 check("nor by climbing out of the app folder altogether",
       _pub("lib/fonts/../../../x.woff2"), False)
 
+
+section("The mirror follows deletions, and keeps itself current")
+
+import archive as AR2                                     # noqa: E402
+import tempfile as _t9                                    # noqa: E402
+import threading as _th9                                  # noqa: E402
+from http.server import BaseHTTPRequestHandler as _BH9, HTTPServer as _HS9  # noqa: E402
+
+
+class _Mirror(_BH9):
+    """PostgREST that remembers: upserts land, deletes remove."""
+    calls = []
+    held = set()
+    fail_delete = False
+
+    def do_POST(self):
+        n = int(self.headers.get("content-length") or 0)
+        rows = json.loads(self.rfile.read(n).decode("utf-8"))
+        table = self.path.split("?")[0].rsplit("/", 1)[-1]
+        _Mirror.calls.append(("POST", table))
+        if table == "reports":
+            for r in rows:
+                _Mirror.held.add(r["report_id"])
+        self.send_response(201)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def do_DELETE(self):
+        from urllib.parse import urlparse as _u, parse_qs as _q
+        q = _q(_u(self.path).query)
+        rid = (q.get("report_id") or [""])[0].replace("eq.", "", 1)
+        _Mirror.calls.append(("DELETE", rid))
+        if _Mirror.fail_delete:
+            body = b'{"message":"permission denied"}'
+            self.send_response(403)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        _Mirror.held.discard(rid)
+        self.send_response(204)
+        self.end_headers()
+
+    def log_message(self, *a):
+        pass
+
+
+_ms = _HS9(("127.0.0.1", 0), _Mirror)
+_th9.Thread(target=_ms.serve_forever, daemon=True).start()
+_mbase = "http://127.0.0.1:%d" % _ms.server_address[1]
+
+_mh = Path(_t9.mkdtemp())
+_mdb = _mh / "reports.db"
+(_mh / "supabase.json").write_text(json.dumps({
+    "url": _mbase, "key": "sb_publishable_" + "x" * 30,
+    "writeKey": "sb_secret_" + "y" * 30}), encoding="utf-8")
+
+
+def _mk(job, h):
+    rid = AR2.record_report(_mdb, {
+        "jobId": job, "reportType": "sku-economics", "marketplace": "US",
+        "periodStart": "2026-09-01", "periodEnd": "2026-09-30",
+        "fileName": job + ".csv"}, content_hash=h, money_scale=10)
+    AR2.record_rows(_mdb, rid, [{"msku": "S", "marketplace": "US",
+                                 "periodStart": "2026-09-01", "periodEnd": "2026-09-30",
+                                 "unitsSold": 1, "sourceLine": 1}], money_scale=10)
+    return rid
+
+
+_sent_rid = _mk("jA", "hA")
+check("a report is sent", SB.sync(_mh, _mdb, archive=AR2)["ok"], True)
+check("the mirror holds it", _sent_rid in _Mirror.held, True)
+
+_unsent_rid = _mk("jB", "hB")
+check("deleting a report that was never sent queues nothing",
+      AR2.forget_report(_mdb, "jB") and AR2.pending_deletes(_mdb), [])
+check("deleting one that WAS sent queues its removal",
+      AR2.forget_report(_mdb, "jA") and AR2.pending_deletes(_mdb), [_sent_rid])
+check("and the status counts it", AR2.mirror_status(_mdb)["pendingDeletes"], 1)
+
+# A refused delete stays queued, and nothing is pushed past it.
+_Mirror.fail_delete = True
+_Mirror.calls = []
+_mk("jC", "hC")
+_r = SB.sync(_mh, _mdb, archive=AR2)
+check("a refused delete is a failure", _r["ok"], False)
+check("the removal stays queued for next time", AR2.pending_deletes(_mdb), [_sent_rid])
+check("and the push waits behind it", [c for c in _Mirror.calls if c[0] == "POST"], [])
+
+_Mirror.fail_delete = False
+_Mirror.calls = []
+_r = SB.sync(_mh, _mdb, archive=AR2)
+check("once allowed, the sync succeeds", _r["ok"], True)
+check("deletions go first, then what is new",
+      [c[0] for c in _Mirror.calls], ["DELETE", "POST", "POST"])
+check("the deleted report is gone from the mirror", _sent_rid in _Mirror.held, False)
+check("and the queue is empty", AR2.pending_deletes(_mdb), [])
+check("it says what it removed", "Removed 1 deleted report" in _r["detail"], True)
+check("a report the mirror already lost counts as removed",
+      SB._delete_remote(_mbase, "sb_secret_" + "y" * 30, "never-there"), None)
+
+# Automatic sending: on by default once it can write; one switch turns it off.
+check("automatic sending is on by default", SB.load(_mh)["autoPush"], True)
+check("it can be turned off", SB.set_auto_push(_mh, False)["autoPush"], False)
+check("and stays off", SB.load(_mh)["autoPush"], False)
+check("and back on", SB.set_auto_push(_mh, True)["autoPush"], True)
+check("the write key survives the switch", SB.load(_mh)["canWrite"], True)
+
+import worker as _W9                                      # noqa: E402
+_runs = []
+_on = {"v": False}
+_auto = _W9.MirrorAutoSync(
+    sync_fn=lambda: (_runs.append(1), {"ok": True, "reports": 0, "rows": 0,
+                                       "deleted": 0, "detail": "ok"})[1],
+    enabled_fn=lambda: _on["v"], log_fn=lambda line: None, lock=_th9.Lock())
+check("switched off, a pass sends nothing", (_auto.run_once("t"), _runs), (None, []))
+_on["v"] = True
+_auto.run_once("t")
+check("switched on, a pass runs the sync", len(_runs), 1)
+check("and records what happened, marked automatic",
+      (_auto.last["ok"], _auto.last["automatic"], _auto.last["reason"]), (True, True, "t"))
+
+# A burst of changes becomes one pass.
+_runs.clear()
+_auto.SETTLE_S = 0.3
+_auto.start()
+for _ in range(5):
+    _auto.poke("new report")
+import time as _tm9                                       # noqa: E402
+_deadline = _tm9.time() + 5
+while not _runs and _tm9.time() < _deadline:
+    _tm9.sleep(0.05)
+_tm9.sleep(0.6)
+check("five changes in a burst send once", len(_runs), 1)
+check("naming the first reason", _auto.last["reason"], "new report")
+
+# A failing sync is counted, so the loop can back off rather than hammer.
+_bad = _W9.MirrorAutoSync(
+    sync_fn=lambda: (_ for _ in ()).throw(RuntimeError("down")),
+    enabled_fn=lambda: True, log_fn=lambda line: None, lock=_th9.Lock())
+_bad.run_once("t")
+_bad.run_once("t")
+check("a failing sync never raises, and is counted", _bad.failures, 2)
+check("the failure is reported plainly", "down" in _bad.last["detail"], True)
+
+_ms.shutdown()
+
 print("passed %d   failed %d" % (PASS, FAIL))
 if FAILURES:
     print("\nFAILURES")

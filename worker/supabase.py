@@ -111,6 +111,9 @@ def load(here: Path) -> dict:
         # the other one.
         "canWrite": bool(write),
         "writeKeyHint": _hint(write) if write else None,
+        # Automatic sending after each download. On unless turned off: the
+        # point of a copy is that it stays current without being remembered.
+        "autoPush": raw.get("autoPush") is not False,
         "lastTestedAt": raw.get("lastTestedAt"),
         "lastResult": raw.get("lastResult"),
         # What is actually protecting these on disk. Stated, never assumed:
@@ -283,6 +286,16 @@ def save_write_key(here: Path, key: str) -> dict:
     """Store the write key beside the rest. Never packaged, never committed."""
     raw = _read(here)
     raw["writeKey"] = key.strip()
+    _write(here, raw)
+    return load(here)
+
+
+def set_auto_push(here: Path, enabled: bool) -> dict:
+    """Turn automatic sending on or off. Manual sending is unaffected."""
+    raw = _read(here)
+    if not raw:
+        return load(here)
+    raw["autoPush"] = bool(enabled)
     _write(here, raw)
     return load(here)
 
@@ -751,3 +764,76 @@ def push(here: Path, db_path: Path, archive=None, log=None) -> dict:
             "detail": "Sent %d report%s (%d rows) to the mirror."
                       % (sent_reports, "" if sent_reports == 1 else "s",
                          sent_rows)}
+
+
+# ---------------------------------------------------------------------------
+# Deletions, and the whole sync.
+# ---------------------------------------------------------------------------
+
+def _delete_remote(url: str, key: str, report_id: str) -> str | None:
+    """Remove one report from the mirror. Its rows go with it (the schema's
+    foreign key cascades). A report already absent counts as done: the goal
+    is that the mirror does not hold it, and it does not."""
+    from urllib.parse import quote
+    req = urllib.request.Request(
+        url.rstrip("/") + "/rest/v1/reports?report_id=eq." + quote(report_id, safe=""),
+        method="DELETE",
+        headers=dict(_headers(key, is_jwt(key)), **{"Prefer": "return=minimal"}))
+    try:
+        with urllib.request.urlopen(req, timeout=PUSH_TIMEOUT_S) as res:
+            return None if res.status < 300 else "reports answered with %d" % res.status
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return None
+        detail = ""
+        try:
+            detail = exc.read(1000).decode("utf-8", "replace")
+        except Exception:
+            pass
+        return _explain_write_failure("reports", exc.code, detail)
+    except urllib.error.URLError as exc:
+        return ("Could not reach the project (%s). Nothing further was sent."
+                % str(getattr(exc, "reason", exc))[:120])
+    except Exception as exc:
+        return "The delete failed (%s)." % str(exc)[:160]
+
+
+def sync(here: Path, db_path: Path, archive=None, log=None) -> dict:
+    """Bring the mirror in line with this computer: deletions first, then
+    everything new or changed.
+
+    Deletions go first so a report deleted and re-downloaded is never briefly
+    doubled, and so a failed push cannot leave the mirror holding something
+    this computer has already let go of.
+    """
+    if archive is None:
+        import archive as archive_mod
+        archive = archive_mod
+    creds = _write_secret(here)
+    if not _secret(here) or not creds:
+        return {"ok": False, "reports": 0, "rows": 0, "deleted": 0,
+                "detail": "Nothing may write yet - no write key on this computer."}
+    url, key = creds
+
+    deleted = 0
+    try:
+        doomed = archive.pending_deletes(db_path)
+    except Exception as exc:
+        return {"ok": False, "reports": 0, "rows": 0, "deleted": 0,
+                "detail": "The local archive could not be read (%s)." % str(exc)[:120]}
+    for rid in doomed:
+        problem = _delete_remote(url, key, rid)
+        if problem:
+            return {"ok": False, "reports": 0, "rows": 0, "deleted": deleted,
+                    "detail": problem}
+        archive.clear_delete(db_path, rid)
+        deleted += 1
+        if log:
+            log("mirror: deleted %s" % rid)
+
+    result = push(here, db_path, archive=archive, log=log)
+    result["deleted"] = deleted
+    if deleted:
+        result["detail"] = ("Removed %d deleted report%s from the mirror. "
+                            % (deleted, "" if deleted == 1 else "s")) + result["detail"]
+    return result

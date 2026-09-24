@@ -151,6 +151,16 @@ CREATE INDEX IF NOT EXISTS report_jobs_job ON report_jobs (job_id);
 -- report forever, and a push that died halfway would have no way to say which
 -- half. Keyed on the report's own updated_at, so a report that changes is
 -- sent again and one that has not is skipped.
+-- Deletions the mirror has not heard about yet. A report deleted here that
+-- was already sent would otherwise live on in the mirror forever - which
+-- makes it a record of everything ever downloaded, not a copy of this one.
+-- Only reports that WERE sent are queued: the mirror_pushed row (which the
+-- delete cascades away) is the evidence, read before it goes.
+CREATE TABLE IF NOT EXISTS mirror_deletes (
+  report_id     TEXT PRIMARY KEY,
+  requested_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS mirror_pushed (
   report_id   TEXT PRIMARY KEY REFERENCES reports(report_id) ON DELETE CASCADE,
   updated_at  TEXT,
@@ -375,23 +385,32 @@ def forget_report(path: Path, job_id: str) -> bool:
                 db.execute("BEGIN")
                 db.execute("DELETE FROM report_jobs WHERE job_id = ?", (job_id,))
 
-                removed = 0
+                doomed = []
                 for report_id in linked:
                     still = db.execute(
                         "SELECT COUNT(*) FROM report_jobs WHERE report_id = ?",
                         (report_id,)).fetchone()[0]
                     if not still:
-                        db.execute("DELETE FROM reports WHERE report_id = ?",
-                                   (report_id,))
-                        removed += 1
+                        doomed.append(report_id)
 
                 if not linked:
                     # A report recorded without a job id to link, or one from
                     # before this table existed. Its own column is the only
                     # thing pointing at it.
-                    cur = db.execute(
-                        "DELETE FROM reports WHERE job_id = ? AND report_id "
-                        "NOT IN (SELECT report_id FROM report_jobs)", (job_id,))
+                    doomed += [r["report_id"] for r in db.execute(
+                        "SELECT report_id FROM reports WHERE job_id = ? AND report_id "
+                        "NOT IN (SELECT report_id FROM report_jobs)", (job_id,))]
+
+                removed = 0
+                for report_id in doomed:
+                    # Read whether the mirror has it BEFORE the delete cascades
+                    # the evidence away.
+                    sent = db.execute("SELECT 1 FROM mirror_pushed WHERE report_id = ?",
+                                      (report_id,)).fetchone()
+                    if sent:
+                        db.execute("INSERT OR REPLACE INTO mirror_deletes (report_id, "
+                                   "requested_at) VALUES (?, ?)", (report_id, _now()))
+                    cur = db.execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
                     removed += cur.rowcount
 
                 db.execute("COMMIT")
@@ -617,7 +636,28 @@ def mirror_status(path: Path) -> dict:
             "  AND m.row_count IS r.rows_stored").fetchone()["c"]
         last = db.execute(
             "SELECT MAX(pushed_at) p FROM mirror_pushed").fetchone()["p"]
+        deletes = db.execute("SELECT COUNT(*) c FROM mirror_deletes").fetchone()["c"]
         return {"reports": total, "sent": sent, "pending": total - sent,
-                "lastPushAt": last}
+                "pendingDeletes": deletes, "lastPushAt": last}
+    finally:
+        db.close()
+
+
+def pending_deletes(path: Path) -> list[str]:
+    """Reports deleted here that the mirror still holds, oldest first."""
+    db = connect(path)
+    try:
+        return [r["report_id"] for r in db.execute(
+            "SELECT report_id FROM mirror_deletes ORDER BY requested_at")]
+    finally:
+        db.close()
+
+
+def clear_delete(path: Path, report_id: str) -> None:
+    """The mirror has let go of this report."""
+    db = connect(path)
+    try:
+        with _LOCK:
+            db.execute("DELETE FROM mirror_deletes WHERE report_id = ?", (report_id,))
     finally:
         db.close()

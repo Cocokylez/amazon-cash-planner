@@ -616,5 +616,26 @@ const H = require('../desktop/helper.js');
     T.ok('and the font licence ships beside them', fs5.existsSync(p5('lib', 'fonts', 'OFL.txt')));
   }
 
+  /* Automatic sending to the mirror: the switch, the route it calls, and the
+     helper answering that route. Three files that must agree; a rename in any
+     one would leave a switch that silently does nothing. */
+  {
+    const fs6 = require('fs');
+    const p6 = (...a) => require('path').join(__dirname, '..', ...a);
+    const app = fs6.readFileSync(p6('lib', 'app.js'), 'utf8');
+    const client = fs6.readFileSync(p6('lib', 'worker.js'), 'utf8');
+    const helper = fs6.readFileSync(p6('worker', 'worker.py'), 'utf8');
+    T.ok('the panel has the automatic-sending switch', /id="mirrorauto"/.test(app));
+    T.ok('and a handler that calls the helper with it',
+      /id === 'mirrorauto'[\s\S]{0,200}mirrorAuto\(/.test(app));
+    T.ok('the client sends it to /supabase/auto', /mirrorAuto:[\s\S]{0,80}'\/supabase\/auto'/.test(client));
+    T.ok('the helper answers /api/supabase/auto', helper.includes('parsed.path == "/api/supabase/auto"'));
+    T.ok('the helper starts its sender at launch', /MIRROR_SYNC\.start\(\)/.test(helper));
+    T.ok('a stored report wakes the sender', /if stored:\s*\n\s*MIRROR_SYNC\.poke/.test(helper));
+    T.ok('a deleted report wakes it too', /if forgotten:\s*\n\s*MIRROR_SYNC\.poke/.test(helper));
+    T.ok('Send now and the sender share one lock',
+      /with SYNC_LOCK:\s*\n\s*result = supabase\.sync\(/.test(helper));
+  }
+
   T.report();
 })();

@@ -448,6 +448,105 @@ def save_settings(data: dict) -> dict:
 WORK_QUEUE: "queue.Queue[str]" = queue.Queue()
 
 
+class MirrorAutoSync:
+    """Keeps the mirror current without anyone having to press Send.
+
+    Poked whenever the archive changes (a report stored, a report deleted,
+    the write key added) and once at startup, to catch up on anything that
+    happened while it was off or offline. A burst of pokes - several reports
+    arriving together - becomes one pass. A pass that fails is retried after
+    a minute, five, then thirty; after that it waits for the next change
+    rather than hammering a project that is down.
+
+    It never blocks a request and never touches the import: the archive is
+    the source of truth, and a mirror that is behind is only behind.
+    """
+
+    SETTLE_S = 3
+    RETRY_S = (60, 300, 1800)
+
+    def __init__(self, sync_fn, enabled_fn, log_fn, lock):
+        self._sync = sync_fn
+        self._enabled = enabled_fn
+        self._log = log_fn
+        self._lock = lock              # shared with the manual Send button
+        self._wake = threading.Event()
+        self._reason_lock = threading.Lock()
+        self._reason = None
+        self._thread = None
+        self.failures = 0
+        self.busy = False
+        self.last = None
+
+    def poke(self, reason: str) -> None:
+        with self._reason_lock:
+            self._reason = self._reason or reason
+        self._wake.set()
+
+    def start(self) -> None:
+        if self._thread is None:
+            self._thread = threading.Thread(target=self._loop, daemon=True,
+                                            name="mirror-sync")
+            self._thread.start()
+
+    def run_once(self, reason: str = "change"):
+        """One pass, now. The loop calls this; so do the tests."""
+        try:
+            if not self._enabled():
+                return None
+        except Exception:
+            return None
+        with self._lock:
+            self.busy = True
+            try:
+                r = self._sync()
+            except Exception as exc:
+                r = {"ok": False, "reports": 0, "rows": 0, "deleted": 0,
+                     "detail": "The sync failed (%s)." % str(exc)[:160]}
+            finally:
+                self.busy = False
+        self.last = dict(r, at=now(), reason=reason, automatic=True)
+        self.failures = 0 if r.get("ok") else self.failures + 1
+        return r
+
+    def _loop(self) -> None:
+        while True:
+            retry = (self.RETRY_S[self.failures - 1]
+                     if 0 < self.failures <= len(self.RETRY_S) else None)
+            woke = self._wake.wait(timeout=retry)
+            if woke:
+                time.sleep(self.SETTLE_S)
+            self._wake.clear()
+            with self._reason_lock:
+                reason = self._reason or ("change" if woke else "retry")
+                self._reason = None
+            try:
+                r = self.run_once(reason)
+                if r is not None and (r.get("reports") or r.get("deleted") or not r.get("ok")):
+                    self._log("mirror auto-sync (%s): %s" % (reason, str(r.get("detail"))[:160]))
+            except Exception as exc:   # the loop must outlive any one pass
+                self._log("mirror auto-sync pass failed: %s" % str(exc)[:160])
+
+    def status(self) -> dict:
+        try:
+            enabled = bool(self._enabled())
+        except Exception:
+            enabled = False
+        return {"enabled": enabled, "busy": self.busy, "failures": self.failures,
+                "last": self.last}
+
+
+def _auto_sync_enabled() -> bool:
+    m = supabase.load(DATA)
+    return bool(m.get("configured") and m.get("canWrite") and m.get("autoPush"))
+
+
+SYNC_LOCK = threading.Lock()
+MIRROR_SYNC = MirrorAutoSync(
+    sync_fn=lambda: supabase.sync(DATA, ARCHIVE_DB, archive=archive, log=log),
+    enabled_fn=_auto_sync_enabled, log_fn=lambda line: log(line), lock=SYNC_LOCK)
+
+
 # ── report definitions ──────────────────────────────────────────────────────
 #
 # Selectors are NOT guessed. Each report starts unverified; `discover.py` opens
@@ -905,6 +1004,7 @@ class Handler(BaseHTTPRequestHandler):
                     out["mirror"] = archive.mirror_status(ARCHIVE_DB)
                 except Exception as exc:
                     out["mirror"] = {"error": str(exc)[:120]}
+                out["auto"] = MIRROR_SYNC.status()
                 return self._json(out)
 
             if path == "/api/jobs":
@@ -1250,7 +1350,9 @@ class Handler(BaseHTTPRequestHandler):
             if not supabase.load(DATA).get("configured"):
                 return self._json({"error": "Connect the project first.",
                                    "saved": False}, 400)
-            return self._json(supabase.save_write_key(DATA, key))
+            saved = supabase.save_write_key(DATA, key)
+            MIRROR_SYNC.poke("write key added")
+            return self._json(saved)
 
         if parsed.path == "/api/supabase/write-key/forget":
             gone = supabase.forget_write_key(DATA)
@@ -1261,11 +1363,22 @@ class Handler(BaseHTTPRequestHandler):
                            "until it is added again.")
             return self._json(out)
 
+        if parsed.path == "/api/supabase/auto":
+            out = supabase.set_auto_push(DATA, bool(payload.get("enabled")))
+            if out.get("autoPush"):
+                MIRROR_SYNC.poke("automatic sending turned on")
+            out["auto"] = MIRROR_SYNC.status()
+            out["mirror"] = archive.mirror_status(ARCHIVE_DB)
+            return self._json(out)
+
         if parsed.path == "/api/supabase/push":
             # Synchronous on purpose. The server is threaded, so this does not
             # block the app, and a push that reports its real outcome is worth
             # far more than one that returns instantly and is wrong.
-            result = supabase.push(DATA, ARCHIVE_DB, archive=archive, log=log)
+            # The whole sync - deletions too - and under the same lock as the
+            # automatic sender, so the two never send the same report at once.
+            with SYNC_LOCK:
+                result = supabase.sync(DATA, ARCHIVE_DB, archive=archive, log=log)
             result["mirror"] = archive.mirror_status(ARCHIVE_DB)
             return self._json(result, 200 if result.get("ok") else 502)
 
@@ -1345,6 +1458,8 @@ class Handler(BaseHTTPRequestHandler):
             scale = payload.get("moneyScale")
             scale = scale if isinstance(scale, int) else None
             stored = archive.record_rows(ARCHIVE_DB, report_id, rows, scale)
+            if stored:
+                MIRROR_SYNC.poke("new report")
             return self._json({"reportId": report_id, "rowsStored": stored,
                                "rowsSent": len(rows)})
 
@@ -1363,6 +1478,8 @@ class Handler(BaseHTTPRequestHandler):
             # what someone asked to remove would be a worse surprise than an
             # archive that loses history they chose to lose.
             forgotten = archive.forget_report(ARCHIVE_DB, job_id)
+            if forgotten:
+                MIRROR_SYNC.poke("report deleted")
 
             return self._json({
                 "archived": forgotten,
@@ -1464,6 +1581,8 @@ def main() -> None:
     preflight()
 
     threading.Thread(target=worker_loop, daemon=True).start()
+    MIRROR_SYNC.start()
+    MIRROR_SYNC.poke("startup")
 
     try:
         httpd = ThreadingHTTPServer((HOST, PORT), Handler)
