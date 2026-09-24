@@ -296,4 +296,44 @@ T.section('Balances stay separate and profit is untouched');
     Object.values(Cash.EV).every(k => k !== 'profit'));
 }
 
+/* ── the bank, day by day ─────────────────────────────────────────────────
+   Before this there was no spendable figure anywhere in the app, while the
+   readiness list counted "What is safe to spend" as working. */
+T.section('Bank projection: what is safe to spend');
+{
+  let threw = null;
+  try { Cash.bankProjection({ opening: null, from: '2026-09-24', to: '2026-11-18' }); }
+  catch (e) { threw = e; }
+  T.ok('no bank cash is unavailable, never zero', threw && threw.name === 'Unavailable');
+
+  const p = Cash.bankProjection({
+    opening: $(10000), openingDate: '2026-09-24', from: '2026-09-24', to: '2026-11-18',
+    buffer: $(2000),
+    receipts: [{ date: '2026-10-02', amount: $(6000) }, { date: '2026-12-01', amount: $(9999) }],
+    commitments: [
+      { due: '2026-09-30', amount: $(7000), label: 'Supplier' },
+      { due: '2026-10-02', amount: $(4000), label: 'Card' },
+      { due: '2026-09-20', amount: $(500), label: 'Old bill' },
+      { due: '2026-12-15', amount: $(100), label: 'Beyond' },
+    ],
+  });
+  T.eq('the low point is found', D(p.lowest.amount), D($(10000 - 7000 - 4000)));
+  T.eq('on the day it happens', p.lowest.date, '2026-10-02');
+  /* 10,000 - 7,000 = 3,000; then on Oct 2 the card (4,000) goes BEFORE the
+     6,000 receipt, so the balance touches -1,000 before recovering. */
+  T.ok('same-day outflows go first, so a receipt never flatters the low point',
+    p.lowest.amount === $(-1000));
+  T.eq('safe to spend is the low point less the buffer', D(p.safeToSpend), D($(-3000)));
+  T.eq('and a negative is a named shortfall, not floored to zero', D(p.shortfall), D($(3000)));
+  T.eq('a bill due before the cash was recorded is not taken off again', p.notCounted.length, 1);
+  T.ok('and says why', /before the bank cash was recorded/.test(p.notCounted[0].why));
+  T.ok('nothing beyond the horizon is counted',
+    !p.rows.some(r => r.date > '2026-11-18'));
+  T.eq('the running balance ends where the arithmetic does', D(p.ending), D($(10000 - 7000 - 4000 + 6000)));
+
+  const none = Cash.bankProjection({ opening: $(5000), from: '2026-09-24', to: '2026-10-24' });
+  T.eq('nothing planned: the low point is the bank cash itself', D(none.lowest.amount), D($(5000)));
+  T.ok('an unset buffer is reported as unset, not as a chosen zero', none.bufferSet === false);
+}
+
 process.exit(T.report() ? 0 : 1);

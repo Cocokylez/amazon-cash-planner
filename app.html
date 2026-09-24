@@ -165,7 +165,9 @@ button.pill { border: 0; cursor: pointer; }
 .card-h { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
 .card-h h2 { font-size: var(--t-h2); line-height: 1.5; }
 .card-h .ic { color: var(--ink-3); }
-.card-h .tag { margin-left: auto; }
+.card-h .tag { margin-left: auto; flex: none; }
+.card-h.nowrap { flex-wrap: nowrap; align-items: flex-start; }
+.card-h.nowrap h2 { min-width: 0; }
 .card .sub { color: var(--ink-2); font-size: var(--t-body); line-height: 1.5;
              margin-bottom: var(--s2); max-width: 72ch; }
 .grid { display: grid; gap: var(--gap); margin-bottom: var(--gap); }
@@ -399,6 +401,16 @@ input:focus, select:focus, textarea:focus { border-color: var(--accent);
 .subtabs button[aria-current="true"] { color: var(--ink); font-weight: 600;
                                        border-bottom-color: var(--accent); }
 .subtabs .count { font-weight: 600; color: var(--ink); }
+/* A tabbed card (v3 Reconciliation): the tab strip is the card's head, and
+   what each tab draws sits inside it rather than as cards of its own. */
+.tabcard { padding: 8px 20px 22px; }
+.tabcard > .subtabs { margin: 0 -20px 18px; padding: 0 20px; }
+.tabcard .card { border: 0; border-radius: 0; box-shadow: none; padding: 0; margin: 0 0 22px; }
+.tabcard .card + .card { border-top: 1px solid var(--line-soft); padding-top: 20px; }
+.tabcard .tscroll { margin: 0 -20px; padding: 0 20px; }
+.nested .body > .card, .nested .body > section.card { border: 0; border-radius: 0; box-shadow: none;
+  padding: 0; margin: 0 0 22px; }
+.nested .body > .card + .card { border-top: 1px solid var(--line-soft); padding-top: 20px; }
 
 details { border: 1px solid var(--line-soft); border-radius: var(--r-banner); padding: 10px 12px;
           margin: var(--s1) 0; background: var(--surface-alt); }
@@ -479,7 +491,7 @@ details[open] > summary { margin-bottom: 10px; }
 .brand-tile .ic { width: 17px; height: 17px; stroke-width: 2; }
 .navgroup { font-size: var(--t-tag); font-weight: 500; color: var(--ink-3); padding: 16px 10px 4px; }
 .navbadge { margin-left: auto; font-size: var(--t-tag); font-weight: 500; color: var(--warn);
-            line-height: 20px; }
+            line-height: 20px; flex: none; }
 #side nav button span:not(.navbadge) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Where the figures come from, and how fresh they are, always in view. */
 .datastatus { display: flex; flex-direction: column; gap: 6px; width: auto; margin: 0 8px 8px;
@@ -533,8 +545,8 @@ details[open] > summary { margin-bottom: 10px; }
   #side .brand { display: flex; align-items: center; gap: 9px; padding: 14px 16px 12px;
                  font-weight: 600; font-size: var(--t-body); }
   #side nav { display: flex; flex-direction: column; gap: 2px; flex: 1; overflow-y: auto;
-              padding: 0 13px 12px; }
-  #side nav button { display: flex; align-items: center; gap: 11px; width: 100%; background: none;
+              padding: 0 11px 12px; }
+  #side nav button { display: flex; align-items: center; gap: 10px; width: 100%; background: none;
                      border: 0; text-align: left; min-height: 40px; padding: 0 10px;
                      border-radius: var(--r-nav); color: var(--ink-2); font-size: var(--t-body);
                      font-weight: 500; cursor: pointer;
