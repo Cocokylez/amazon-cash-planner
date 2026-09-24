@@ -81,7 +81,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.16"
+HELPER_VERSION = "4.9.17"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -103,6 +103,34 @@ def _config() -> dict:
 _CFG = _config()
 PORT = PORT or int(_CFG.get("port") or 8765)
 TOKEN = os.environ.get("FBA_WORKER_TOKEN") or _CFG.get("token") or uuid.uuid4().hex
+
+
+def _publish_token() -> None:
+    """Write the token this helper is ACTUALLY using back to config.json.
+
+    The env var wins over the file, and the file was never updated to match -
+    so config.json could name a token no running helper would accept. Anything
+    that reads it to talk to the helper then fails on a correct-looking value.
+
+    That is not theoretical: it is why a stale helper could not be asked to
+    shut down, and had to be ended by force instead. A file that claims to
+    hold the token has to hold the real one.
+    """
+    if not TOKEN:
+        return
+    try:
+        if _CFG.get("token") == TOKEN and _CFG.get("port") == PORT:
+            return
+        path = DATA / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        merged = dict(_CFG or {})
+        merged["token"] = TOKEN
+        merged["port"] = PORT
+        path.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    except Exception:
+        # Not worth failing to start over. The helper still works; only
+        # things reading the file are affected.
+        pass
 
 TYPES = {
     ".html": "text/html; charset=utf-8",
@@ -140,6 +168,20 @@ def redact(text: str) -> str:
     out = out.replace(str(Path.home()), '<home>')
     if TOKEN:
         out = out.replace(TOKEN, "<token-redacted>")
+
+    # Supabase keys. The secret one ignores every access rule in the
+    # project, so it must never reach a log file somebody might paste
+    # into a chat or attach to a bug report. Matched by shape, not by
+    # looking the value up: that catches it wherever it came from - an
+    # error message, a URL, a stack trace - with no secret held in
+    # memory to compare against.
+    out = re.sub(r'\bsb_(secret|publishable)_[A-Za-z0-9_\-]{10,}',
+                 r'<sb_\1-redacted>', out)
+    # JWT-shaped keys, which older projects still issue.
+    out = re.sub(
+        r'\beyJ[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}\.[A-Za-z0-9_\-]{6,}',
+        '<jwt-redacted>', out)
+    out = re.sub(r'(?i)(apikey\s*[:=]\s*)\S+', r'\1<redacted>', out)
     for key in ("token=", "Cookie:", "set-cookie", "session-id", "x-amz-"):
         idx = 0
         while True:
@@ -153,6 +195,32 @@ def redact(text: str) -> str:
             out = out[:end] + "<redacted>" + out[stop:]
             idx = end + 10
     return out
+
+
+def _plain_failure(exc: Exception) -> str:
+    """What went wrong, in words rather than in Playwright's.
+
+    The commonest failure by far is nobody signing in: the browser opens,
+    waits at Amazon's login, and is eventually closed. Playwright reports
+    that as "Target page, context or browser has been closed" over a stack
+    trace, which reads like the program broke. It did not - it was waiting
+    for something that never happened, and saying so is the difference
+    between a bug report and a next step.
+    """
+    text = str(exc)
+    low = text.lower()
+
+    if "target page, context or browser has been closed" in low             or "browser has been closed" in low:
+        return ("The browser was closed before the report finished. If it was "
+                "waiting at Amazon's sign-in page, sign in when it opens and "
+                "leave the window alone until it closes itself.")
+    if "timeout" in low and "sellercentral" in low:
+        return ("Seller Central did not finish loading in time. That is "
+                "usually a slow connection or a sign-in page waiting for you.")
+    if "net::err" in low or "econnrefused" in low:
+        return ("The browser could not reach Amazon (%s). Check the "
+                "connection and try again." % text[:80])
+    return text
 
 
 def log(line: str) -> None:
@@ -549,7 +617,7 @@ def run_job(job_id: str) -> None:
             )
     except Exception as exc:
         JOBS.update(job_id, status="failed", finishedAt=now(),
-                    lastError=str(exc),
+                    lastError=_plain_failure(exc),
                     statusDetail="The download did not complete.")
         return
 
@@ -1369,6 +1437,9 @@ def main() -> None:
     PROFILE_DIR.mkdir(exist_ok=True)
     DOWNLOAD_DIR.mkdir(exist_ok=True)
     LOG_DIR.mkdir(exist_ok=True)
+    # Before anything else can need it: config.json must name the token this
+    # helper will actually accept, not one it was started with once.
+    _publish_token()
     log("starting: port=%d appdir=%s" % (PORT, APP_DIR))
 
     preflight()

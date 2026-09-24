@@ -1840,6 +1840,109 @@ finally:
     _ls.shutdown()
 
 
+section("config.json must name the token the helper will actually accept")
+
+# The env var wins over the file, and the file was never updated to match. So
+# config.json could name a token no running helper would take, and anything
+# reading it failed on a value that looked perfectly correct. That is why a
+# stale helper could not be asked to shut down and had to be ended by force.
+import os as _os, subprocess as _sp, sys as _sys        # noqa: E402
+
+_td = Path(_t3.mkdtemp())
+(_td / "config.json").write_text(
+    json.dumps({"token": "stale-one", "port": 8765}), encoding="utf-8")
+_env = dict(_os.environ, FBA_WORKER_TOKEN="the-real-one",
+            FBA_DATA_DIR=str(_td))
+_r = _sp.run([_sys.executable, "-c", "import worker; worker._publish_token()"],
+             env=_env, capture_output=True, text=True,
+             cwd=str(Path(__file__).resolve().parent))
+check("the helper starts cleanly", _r.returncode, 0)
+_after = json.loads((_td / "config.json").read_text("utf-8"))
+check("and config.json now holds the token it really uses",
+      _after["token"], "the-real-one")
+check("and the port with it", _after["port"], 8765)
+
+
+section("Secrets at rest")
+
+import secretbox as SBX                                   # noqa: E402
+
+# The write key ignores every access rule in the project. In a JSON file in
+# plain text it is readable by anything running as this user, by any backup,
+# and by anyone who copies the file off the machine.
+_sh = Path(_t3.mkdtemp())
+_SECRET = "sb_secret_" + "k" * 30
+_PUB = "sb_publishable_" + "p" * 30
+
+SB.save(_sh, "https://p.supabase.co", _PUB, {"ok": True, "detail": "x"})
+SB.save_write_key(_sh, _SECRET)
+
+_on_disk = (_sh / "supabase.json").read_text("utf-8")
+if SBX.available():
+    check("the secret key is not on disk in the clear",
+          _SECRET in _on_disk, False)
+    check("nor is the publishable one", _PUB in _on_disk, False)
+    check("what is stored is marked as protected",
+          SBX.PREFIX in _on_disk, True)
+else:
+    check("without protection available, that is said rather than implied",
+          "plain text" in SBX.say_state(), True)
+
+# Protected or not, the app must still work.
+check("the keys still come back for use",
+      SB._write_secret(_sh)[1], _SECRET)
+check("and the publishable one too", SB._secret(_sh)[1], _PUB)
+check("and neither is handed to the page",
+      _SECRET in json.dumps(SB.load(_sh)) or _PUB in json.dumps(SB.load(_sh)),
+      False)
+check("what protects them is stated, not assumed",
+      bool(SB.load(_sh)["atRest"]), True)
+
+# Ciphertext from another account must not be handed out as if it were a key:
+# it would be sent to Supabase and come back "invalid", pointing at the wrong
+# fault entirely.
+check("unreadable ciphertext yields nothing, not the ciphertext",
+      SBX.unprotect(SBX.PREFIX + "bm90LW1pbmU="), "")
+check("a value stored in the clear still reads back",
+      SBX.unprotect("sb_secret_plain"), "sb_secret_plain")
+
+# An existing install must upgrade itself rather than ask for the keys again.
+_mh = Path(_t3.mkdtemp())
+(_mh / "supabase.json").write_text(json.dumps(
+    {"url": "https://p.supabase.co", "key": _PUB, "writeKey": _SECRET}),
+    encoding="utf-8")
+check("a plain-text install still loads", SB.load(_mh)["canWrite"], True)
+if SBX.available():
+    check("and is encrypted in place on the way past",
+          _SECRET in (_mh / "supabase.json").read_text("utf-8"), False)
+    check("with the key still usable afterwards",
+          SB._write_secret(_mh)[1], _SECRET)
+
+
+section("No secret reaches a log file")
+
+import worker as WK                                       # noqa: E402
+
+check("a secret key is scrubbed",
+      _SECRET in WK.redact("push failed with " + _SECRET), False)
+check("and named so the line still makes sense",
+      "<sb_secret-redacted>" in WK.redact("push failed with " + _SECRET), True)
+check("a publishable key is scrubbed too",
+      _PUB in WK.redact("using " + _PUB), False)
+check("a JWT-shaped key is scrubbed",
+      "<jwt-redacted>" in WK.redact(
+          "key eyJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYW5vbiJ9.aaaaaaaaaa"), True)
+check("an apikey header is scrubbed",
+      "secretvalue" in WK.redact("apikey: secretvalue"), False)
+# A redactor that eats ordinary text makes logs useless and gets turned off.
+check("ordinary log lines are left alone",
+      WK.redact("sent 1 report (2 rows) to the mirror"),
+      "sent 1 report (2 rows) to the mirror")
+check("and so are report figures",
+      WK.redact("net_sales_scaled 95514733333297"),
+      "net_sales_scaled 95514733333297")
+
+
 
 print("passed %d   failed %d" % (PASS, FAIL))
 if FAILURES:

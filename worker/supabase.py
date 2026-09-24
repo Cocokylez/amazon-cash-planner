@@ -34,11 +34,55 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+import secretbox
+
 CONFIG_NAME = "supabase.json"
 
 # A request that has not answered in this long is not going to. The app must
 # never sit waiting on a mirror: it is a copy, not the work.
 TIMEOUT_S = 10
+
+
+def _read(here: Path) -> dict:
+    """The stored settings, with secrets decrypted.
+
+    Anything still in plain text is re-written protected on the way past, so
+    an existing install is upgraded the first time it is read rather than
+    needing the keys pasted again.
+    """
+    p = config_path(here)
+    if not p.is_file():
+        return {}
+    try:
+        raw = json.loads(p.read_text("utf-8"))
+    except Exception:
+        return {}
+
+    bare = False
+    for field in ("key", "writeKey"):
+        val = raw.get(field) or ""
+        if not val:
+            continue
+        if secretbox.is_protected(val):
+            raw[field] = secretbox.unprotect(val)
+        else:
+            bare = True
+
+    if bare and secretbox.available():
+        try:
+            _write(here, raw)
+        except Exception:
+            pass  # Readable either way; it will be tried again next time.
+    return raw
+
+
+def _write(here: Path, data: dict) -> None:
+    """Store the settings, protecting the secrets on the way in."""
+    out = dict(data)
+    for field in ("key", "writeKey"):
+        if out.get(field):
+            out[field] = secretbox.protect(out[field])
+    config_path(here).write_text(json.dumps(out, indent=2), encoding="utf-8")
 
 
 def config_path(here: Path) -> Path:
@@ -47,15 +91,9 @@ def config_path(here: Path) -> Path:
 
 def load(here: Path) -> dict:
     """What has been configured, with the key never returned in full."""
-    p = config_path(here)
-    if not p.is_file():
+    if not config_path(here).is_file():
         return {"configured": False}
-    try:
-        raw = json.loads(p.read_text("utf-8"))
-    except Exception as exc:
-        return {"configured": False, "error":
-                "supabase.json could not be read (%s). It was not changed."
-                % str(exc)[:100]}
+    raw = _read(here)
 
     url = (raw.get("url") or "").strip()
     key = (raw.get("key") or "").strip()
@@ -75,6 +113,11 @@ def load(here: Path) -> dict:
         "writeKeyHint": _hint(write) if write else None,
         "lastTestedAt": raw.get("lastTestedAt"),
         "lastResult": raw.get("lastResult"),
+        # What is actually protecting these on disk. Stated, never assumed:
+        # a security measure that quietly did nothing would be worse than
+        # none at all.
+        "atRest": secretbox.say_state(),
+        "encrypted": secretbox.available(),
     }
 
 
@@ -87,13 +130,7 @@ def _hint(key: str) -> str:
 
 
 def _secret(here: Path) -> tuple[str, str] | None:
-    p = config_path(here)
-    if not p.is_file():
-        return None
-    try:
-        raw = json.loads(p.read_text("utf-8"))
-    except Exception:
-        return None
+    raw = _read(here)
     url = (raw.get("url") or "").strip().rstrip("/")
     key = (raw.get("key") or "").strip()
     return (url, key) if url and key else None
@@ -244,42 +281,26 @@ def check_write_key(key: str) -> str | None:
 
 def save_write_key(here: Path, key: str) -> dict:
     """Store the write key beside the rest. Never packaged, never committed."""
-    p = config_path(here)
-    raw = {}
-    if p.is_file():
-        try:
-            raw = json.loads(p.read_text("utf-8"))
-        except Exception:
-            raw = {}
+    raw = _read(here)
     raw["writeKey"] = key.strip()
-    p.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+    _write(here, raw)
     return load(here)
 
 
 def forget_write_key(here: Path) -> bool:
     """Drop the write key, keeping the connection. Pushing stops; reading
     settings and testing the connection carry on."""
-    p = config_path(here)
-    if not p.is_file():
+    if not config_path(here).is_file():
         return False
-    try:
-        raw = json.loads(p.read_text("utf-8"))
-    except Exception:
-        return False
+    raw = _read(here)
     if not raw.pop("writeKey", None):
         return False
-    p.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+    _write(here, raw)
     return True
 
 
 def _write_secret(here: Path) -> tuple[str, str] | None:
-    p = config_path(here)
-    if not p.is_file():
-        return None
-    try:
-        raw = json.loads(p.read_text("utf-8"))
-    except Exception:
-        return None
+    raw = _read(here)
     url = (raw.get("url") or "").strip().rstrip("/")
     key = (raw.get("writeKey") or "").strip()
     return (url, key) if url and key else None
@@ -433,14 +454,17 @@ def save(here: Path, url: str, key: str, result: dict) -> dict:
     it works.
     """
     from datetime import datetime, timezone
-    p = config_path(here)
-    p.write_text(json.dumps({
+    keep = _read(here)
+    _write(here, {
         "url": url.strip().rstrip("/"),
         "key": key.strip(),
+        # A write key already granted is not revoked by re-testing the
+        # connection: they are two separate decisions.
+        "writeKey": keep.get("writeKey") or "",
         "lastTestedAt": datetime.now(timezone.utc).isoformat(),
         "lastResult": {"ok": bool(result.get("ok")),
                        "detail": result.get("detail")},
-    }, indent=2), encoding="utf-8")
+    })
     return load(here)
 
 
