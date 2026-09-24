@@ -65,3 +65,8 @@ worker/supabase.json
 # A separate data folder for development, so the dev copy never shares
 # the installed app's database or Amazon session.
 worker/devdata/
+
+# Design mockups, sample data and previews stay local: the repo is public, and
+# these are working material. The measured spec is the part worth keeping.
+design/*
+!design/v3-layout-map.md
