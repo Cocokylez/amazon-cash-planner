@@ -740,8 +740,8 @@ const H = require('../desktop/helper.js');
     T.ok('two refreshes cannot import the same report at once',
       /importingNow\.has\(j\.jobId\)/.test(app) && /finally \{\s*importingNow\.delete\(j\.jobId\)/.test(app)
       && !/_taken/.test(app));
-    T.ok('with no period chosen, the download panel says so instead of inventing one',
-      /No period chosen, so each report uses its own window/.test(app)
+    T.ok('the download panel says what the window will ask for, not an invented period',
+      /It opens on the next eight weeks/.test(app)
       && !/state\.filters\.to \|\| CSV\.addDays\(state\.today, 13\)/.test(app));
   }
 
@@ -773,12 +773,36 @@ const H = require('../desktop/helper.js');
     T.ok('the window sends its own forecast and history dates',
       /forecast: \(choice && choice\.forecast\) \|\| null/.test(app) && /history: \(choice && choice\.history\) \|\| null/.test(app));
     T.ok('the forecast cannot start before tomorrow', /g\.fFrom < tomorrow/.test(app));
-    T.ok('the history cannot reach past today, and needs a country',
-      /g\.hTo > state\.today/.test(app) && /Choose at least one country/.test(app));
+    T.ok('the window is the forecast only - no transaction history section',
+      !/Transaction history \\u00b7 Payments/.test(app) && /history: null/.test(app));
     T.ok('the helper uses the window’s forecast dates as a custom range',
       /if fc_win:[\s\S]{0,200}drange = "Custom date range"[\s\S]{0,40}dfrom, dto = fc_win/.test(helper));
     T.ok('and the window’s history dates, never reaching the future',
       /history_window\(\*\(hist_win or \(override_from, override_to\)\)\)/.test(helper));
+  }
+
+  /* Notifications, and a forecast-only app. */
+  {
+    const fs15 = require('fs');
+    const p15 = (...a) => require('path').join(__dirname, '..', ...a);
+    const app = fs15.readFileSync(p15('lib', 'app.js'), 'utf8');
+    const Dataset = require('../lib/dataset.js');
+    T.ok('a bell sits at the top of every screen', /let html = noticeBell\(\);/.test(app));
+    T.ok('downloads report each change of state there', /noticeJobChanges\(\);/.test(app)
+      && /'Complete: ' \+ name/.test(app) && /'Failed: ' \+ name/.test(app));
+    T.ok('every import result goes there, receipt folded inside', /noticeForImport\(state\.lastImport\)/.test(app));
+    T.ok('the Data screen no longer carries the import receipt card', !/html \+= importReceiptBlock\(\);/.test(app));
+    T.ok('nor the download result box', !/esc\(REFRESH_WORDS\[phase\] \|\| phase\) \+ '\.<\/b>'/.test(app));
+    T.ok('saved notifications are read without touching anything not yet defined',
+      /function loadNotices\(\) \{\s*try \{\s*const raw = JSON\.parse\(localStorage\.getItem\('fba-notices-v1'\)/.test(
+        app.replace(/\/\*[\s\S]*?\*\//g, '')));
+    T.ok('the download asks Amazon for the forecast only', /reports: FETCHED/.test(app)
+      && /const FETCHED = \['fees-preview'\]/.test(app));
+    const rd = Dataset.readiness({ forecast: { present: true }, actual: { present: false } });
+    T.eq('transaction-history features are optional, not missing',
+      rd.filter(r => r.optional).map(r => r.id).join(','), 'actual-expenses,payout-timing');
+    T.ok('and are not counted as blocking', !Dataset.blocking(rd).some(r => r.optional));
+    T.eq('so the count is out of the features in use', Dataset.counted(rd).length, rd.length - 2);
   }
 
   /* "Today", and the periods built on it. */

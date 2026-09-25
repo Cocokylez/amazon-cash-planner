@@ -83,7 +83,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.29"
+HELPER_VERSION = "4.9.30"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -1287,7 +1287,11 @@ class Handler(BaseHTTPRequestHandler):
             hist_win = iso_pair(payload.get("history"))
 
             created, skipped, blocked = [], [], []
-            for rt in REPORTS:
+            # The reports this press asked for. The app sends only the
+            # forecast; a report nobody asked for is not "skipped".
+            wanted = payload.get("reports")
+            wanted = [r for r in wanted if r in REPORTS] if isinstance(wanted, list) else list(REPORTS)
+            for rt in wanted:
                 ready, why = report_ready(rt)
                 if not ready:
                     blocked.append({"reportType": rt, "reason": why})

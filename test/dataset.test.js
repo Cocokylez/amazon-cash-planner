@@ -181,7 +181,8 @@ T.section('Readiness is honest when nothing is loaded');
 {
   const ds = Dataset.build({ previews: [], ledger: null, inputs: {} });
   T.eq('nothing claims to be ready', Dataset.ready(ds.readiness).length, 0);
-  T.eq('and everything is blocked', Dataset.blocking(ds.readiness).length, ds.readiness.length);
+  T.eq('and everything in use is blocked - the optional transaction-history features are not counted',
+    Dataset.blocking(ds.readiness).length, ds.readiness.filter(r => !r.optional).length);
 }
 
 /* ── the actual branch ───────────────────────────────────────────────────── */

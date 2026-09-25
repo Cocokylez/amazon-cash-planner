@@ -561,6 +561,12 @@ _hf, _ht = W.range_for("date-range-transactions", _t)
 check("a HISTORICAL window still ends today", _ht, "2026-09-22")
 check("and looks backwards", _hf < _ht, True)
 
+# Only the reports a press asks for are fetched - and a report nobody asked
+# for is not "skipped". The app asks for the forecast alone.
+_src = (Path(W.HERE) / "worker.py").read_text("utf-8")
+check("the refresh honours the list of reports asked for",
+      'wanted = payload.get("reports")' in _src and "for rt in wanted:" in _src, True)
+
 # The download window's dates: real dates in order, or nothing.
 check("a date pair from the window is read", W.iso_pair({"from": "2026-09-26", "to": "2026-11-20"}),
       ("2026-09-26", "2026-11-20"))
