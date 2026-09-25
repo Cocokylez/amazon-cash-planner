@@ -155,8 +155,14 @@ T.section('Where net sales go: the bars say what the tiles say');
   T.ok('each piece reads out its amount and share', /Left after fees and ads/.test(html) && /50\.0%/.test(html));
   const loss = Charts.spend([{ label: 'SKU-X', netSales: 10000, parts: [{ name: 'FBA fulfillment fees', amount: 15000 }] }],
     { share: true, label: true, currency: 'USD' });
-  T.ok('a product that costs more than it sells says so', /loses USD 50\.00/.test(loss));
-  T.ok('with nothing left to show', !/data-tip="[^"]*Left after fees and ads&quot;,&quot;USD 50/.test(loss));
+  T.ok('a product that costs more than it sells says so', /loses \$50\.00/.test(loss));
+  T.ok('with nothing left to show', !/data-tip="[^"]*Left after fees and ads&quot;,&quot;\$50/.test(loss));
+  const Money = require('../lib/money.js');
+  T.eq('money reads with its sign', [Money.fmt(97461, { currency: 'USD' }), Money.fmt(-31851, { currency: 'USD' }),
+    Money.fmt(-31851, { currency: 'CAD' }), Money.fmt(100, { currency: 'SEK' })].join(' '),
+    '$974.61 -$318.51 -CA$318.51 SEK 1.00');
+  T.eq('and short, on the axes', [Money.fmtShort(5000000, 'USD'), Money.fmtShort(-1500000, 'MXN')].join(' '),
+    '$50k -MX$15k');
   const noSales = Charts.spend([{ label: 'SKU-Y', netSales: 0, parts: [{ name: 'Monthly inventory storage fee', amount: 1200 }] }],
     { share: true, label: true, currency: 'USD' });
   T.ok('fees with no sales are named, not drawn as a share', /No sales on these dates/.test(noSales));
