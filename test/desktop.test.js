@@ -829,9 +829,12 @@ const H = require('../desktop/helper.js');
     T.ok('a part not on screen is named, never pointed at', /if \(el && !el\.getClientRects\(\)\.length\) el = null;/.test(app));
     const targets = (app.match(/target: '([^']+)'/g) || []).map(t => t.slice(9, -1));
     const ids = targets.map(t => (t.match(/#([\w-]+)/) || [])[1]).filter(Boolean);
-    T.ok('every part it points at exists in the page', ids.every(id => app.indexOf('id="' + id + '"') >= 0
-      || app.indexOf("id=\"" + id) >= 0 || require('fs').readFileSync(require('path').join(__dirname, '..', 'app.html'), 'utf8')
-        .indexOf('id="' + id + '"') >= 0), ids.filter(id => app.indexOf('id="' + id + '"') < 0).join(','));
+    const page = require('fs').readFileSync(require('path').join(__dirname, '..', 'app.html'), 'utf8');
+    /* a literal id, or a chart drawn by overTime('x', ...), whose id is "xchart" */
+    const exists = id => app.indexOf('id="' + id + '"') >= 0 || page.indexOf('id="' + id + '"') >= 0
+      || (/chart$/.test(id) && app.indexOf("overTime('" + id.slice(0, -5) + "'") >= 0
+        && app.indexOf("id=\"' + id + 'chart\"") >= 0);
+    T.ok('every part it points at exists in the page', ids.every(exists), ids.filter(id => !exists(id)).join(','));
   }
 
   /* Notifications, and a forecast-only app. */

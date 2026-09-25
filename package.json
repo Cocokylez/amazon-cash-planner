@@ -5,7 +5,7 @@
   },
   "name": "amazon-cash-planner",
   "productName": "Amazon Cash Planner",
-  "version": "5.1.0",
+  "version": "5.2.0",
   "description": "Plans Amazon FBA cash flow from reports downloaded on this computer.",
   "private": true,
   "main": "desktop/main.js",

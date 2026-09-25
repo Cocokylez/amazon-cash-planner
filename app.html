@@ -545,6 +545,30 @@ details[open] > summary { margin-bottom: 10px; }
 .spbar { height: 10px; border-radius: 5px; background: var(--surface-alt); overflow: hidden; }
 .spbar i { display: block; height: 100%; border-radius: 5px; }
 .dotkey { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; }
+/* line names at the ends of the lines */
+.ch-lab { font-size: 13px; font-weight: 500; fill: var(--ink); }
+.ch-labv { fill: var(--ink-2); font-weight: 600; }
+/* zooming */
+.fchart svg { cursor: crosshair; user-select: none; -webkit-user-select: none; }
+.fc-brush { fill: var(--accent); opacity: .14; }
+.zoombar { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; flex-wrap: wrap; }
+.zoombar .grow { flex: 1; }
+.zbtn { width: 30px; justify-content: center; padding: 0; font-weight: 600; }
+.chip:disabled { opacity: .4; cursor: default; }
+/* the lines of a fees-over-time chart, each a switch */
+.serchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.chip.serchip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px;
+                  background: var(--fc); border: 1.5px solid var(--fc); }
+.chip.serchip[aria-pressed="true"] { border-color: var(--fc); background: var(--surface); color: var(--ink); }
+.chip.serchip[aria-pressed="false"] { color: var(--ink-3); }
+.chip.serchip[aria-pressed="false"] i { background: transparent; }
+.overtime { border-top: 1px solid var(--line); margin-top: 16px; }
+.skupick { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 0; }
+.skupick select { max-width: 520px; }
+.sp-row { fill: transparent; cursor: pointer; }
+.sp-row:hover { fill: var(--surface-alt); }
+.sp-row.on { fill: var(--accent-soft); }
+[data-sku] { cursor: pointer; }
 
 /* More tools in the sidebar */
 #side nav .navmore { margin-top: 10px; color: var(--ink-2); }

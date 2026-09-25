@@ -163,4 +163,57 @@ T.section('Where net sales go: the bars say what the tiles say');
   T.ok('nothing at all: said, not drawn', /Nothing to show/.test(Charts.spend([], {})));
 }
 
+T.section('Fees against net sales, day by day: every line adds back to its total');
+{
+  const Charts = require('../lib/charts.js');
+  const f = Simple.forecastFor([ten], '2026-10-01', '2026-10-12');
+  const all = Simple.seriesFor(f, null);
+  const sum = (arr, k) => arr.reduce((s, e) => s + (e.v ? e.v[k] || 0 : 0), 0);
+  T.eq('one entry per day', all.length, 12);
+  T.eq('net sales add to the tile', sum(all, 'netSales'), f.netSales);
+  T.eq('each kind of fee adds to its row', sum(all, 'fee:FBA fulfillment fees'),
+    f.fees.find(x => x.name === 'FBA fulfillment fees').amount);
+  T.eq('all fees add to the Amazon fees tile', sum(all, 'fees'), f.feeTotal);
+  T.eq('what is left adds to the after-fees-and-ads tile', sum(all, 'left'), f.afterFeesAndAds);
+  T.ok('days with no download carry nothing', all[10].covered === false && all[10].v === null);
+  const a = Simple.seriesFor(f, 'SKU-A');
+  const ra = f.bySku.find(r => r.msku === 'SKU-A');
+  T.eq('one product: its own net sales', sum(a, 'netSales'), ra.netSales);
+  T.eq('its own fees, kind by kind', sum(a, 'fee:Referral fee'), ra.feeBy['Referral fee']);
+  T.eq('and what it keeps', sum(a, 'left'), ra.net);
+  T.eq('a product not in the forecast: covered days, all zero', sum(Simple.seriesFor(f, 'NOPE'), 'netSales'), 0);
+
+  const series = [{ key: 'netSales', name: 'Net sales', colour: '#000', sign: 1 },
+    { key: 'fee:Referral fee', name: 'Referral fee', colour: '#111', sign: -1 }];
+  const it = Charts.forecastItems(all, { series, metrics: ['netSales', 'fee:Referral fee'], mode: 'running',
+    pctOf: 'netSales' });
+  const end = it.items[9].rows;
+  T.eq('the reading gives each line\u2019s share of sales to date', end.map(r => r[5]).join(','), '1,0.15');
+  T.eq('and the fee as a cost', end[1][2], -f.fees.find(x => x.name === 'Referral fee').amount);
+}
+
+T.section('Zoom, and every line named');
+{
+  const Charts = require('../lib/charts.js');
+  const f = Simple.forecastFor([ten], '2026-10-01', '2026-10-12');
+  const full = Charts.forecast(f.daily, { metrics: ['netSales'], mode: 'running' });
+  const zoomed = Charts.forecast(f.daily, { metrics: ['netSales'], mode: 'running',
+    zoom: { from: '2026-10-04', to: '2026-10-06' } });
+  const itemsOf = h => JSON.parse(h.match(/data-fc="([^"]*)"/)[1].replace(/&quot;/g, '"').replace(/&amp;/g, '&')
+    .replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>')).items;
+  T.eq('all twelve days, unzoomed', itemsOf(full).length, 12);
+  const zi = itemsOf(zoomed);
+  T.eq('zoomed: only those three days are drawn', zi.map(x => x.from).join(','), '2026-10-04,2026-10-05,2026-10-06');
+  T.eq('with the totals still counted from the start', zi[0].rows[0][2], f.daily.slice(0, 4)
+    .reduce((s, e) => s + e.netSales, 0));
+  const four = Charts.forecast(f.daily, { metrics: ['netSales', 'fees', 'advertising', 'after'], mode: 'running' });
+  const labs = [...four.matchAll(/<text class="ch-lab" x="[^"]+" y="([^"]+)"/g)].map(m => +m[1]).sort((a, b) => a - b);
+  T.eq('four lines, four names at their ends', labs.length, 4);
+  T.ok('never on top of each other', labs.every((y, i) => !i || y - labs[i - 1] >= 16.9));
+  T.ok('after fees and ads is dashed, so a line under it shows', /stroke="var\(--mark-4\)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="9 5"/.test(four));
+  const wk = Charts.forecast(f.daily, { metrics: ['netSales'], mode: 'weekly', mondayOf: Simple.mondayOf,
+    zoom: { from: '2026-10-05', to: '2026-10-11' } });
+  T.eq('weekly zoom keeps whole weeks', itemsOf(wk).map(x => x.from).join(), '2026-10-05');
+}
+
 process.exit(T.report() ? 0 : 1);
