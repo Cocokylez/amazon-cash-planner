@@ -767,7 +767,7 @@ const H = require('../desktop/helper.js');
     const p14 = (...a) => require('path').join(__dirname, '..', ...a);
     const app = fs14.readFileSync(p14('lib', 'app.js'), 'utf8');
     const helper = fs14.readFileSync(p14('worker', 'worker.py'), 'utf8');
-    const startAll = app.slice(app.indexOf('async function startAll()'), app.indexOf('function openGetWindow()'));
+    const startAll = app.slice(app.indexOf('async function startAll()'), app.indexOf('function openGetWindow('));
     T.ok('the button opens the window instead of downloading straight away',
       /return openGetWindow\(\);/.test(startAll) && !/return getTodaysData\(\);/.test(startAll));
     T.ok('the window sends its own forecast and history dates',
@@ -779,6 +779,26 @@ const H = require('../desktop/helper.js');
       /if fc_win:[\s\S]{0,200}drange = "Custom date range"[\s\S]{0,40}dfrom, dto = fc_win/.test(helper));
     T.ok('and the window’s history dates, never reaching the future',
       /history_window\(\*\(hist_win or \(override_from, override_to\)\)\)/.test(helper));
+  }
+
+  /* The forecast-only app: two screens, the forecast first. */
+  {
+    const fs16 = require('fs');
+    const p16 = (...a) => require('path').join(__dirname, '..', ...a);
+    const app = fs16.readFileSync(p16('lib', 'app.js'), 'utf8');
+    const html = fs16.readFileSync(p16('app.html'), 'utf8');
+    const nav = app.slice(app.indexOf('const SCREENS = ['), app.indexOf('const HIDDEN_SCREENS = ['));
+    T.eq('the navigation is the forecast and the downloads',
+      (nav.match(/id: '(\w+)'/g) || []).join(','), "id: 'sales',id: 'data'");
+    T.ok('the app opens on the forecast', /screen: 'sales', tab: null/.test(app));
+    T.ok('the old screens are kept, just not in the navigation', /const HIDDEN_SCREENS = \[/.test(app)
+      && /screens\.dashboard = function|screens\.dashboard=/.test(app));
+    T.ok('the forecast screen reads the new calculation', /Simple\.forecastFor\(scoped, from, to\)/.test(app));
+    T.ok('which the page loads', html.indexOf('<script src="lib/simple.js"></script>') > html.indexOf('lib/dataset.js')
+      && html.indexOf('lib/simple.js') < html.indexOf('lib/app.js'));
+    T.ok('Downloads no longer asks for balances, rules, deposits, costs or ad billing',
+      !/html \+= depositsCard\(\);/.test(app) && !/id="payoutrules"/.test(app) && !/html \+= dataTiles\(ds\);/.test(app));
+    T.ok('the sidebar says what forecast is loaded, not a feature count', /\$\('#sidenote'\)\.innerHTML = forecastStatus\(\);/.test(app));
   }
 
   /* Notifications, and a forecast-only app. */

@@ -6,7 +6,7 @@ const { spawnSync } = require('child_process');
 const path = require('path');
 
 const SUITES = ['desktop.test.js', 'ledger.test.js', 'preview.test.js', 'cash.test.js', 'engines.test.js',
-  'import.test.js', 'inputs.test.js', 'claude.test.js', 'sync.test.js', 'dataset.test.js', 'selftest.test.js', 'repair.test.js'];
+  'import.test.js', 'inputs.test.js', 'simple.test.js', 'claude.test.js', 'sync.test.js', 'dataset.test.js', 'selftest.test.js', 'repair.test.js'];
 let failed = 0;
 const summary = [];
 
