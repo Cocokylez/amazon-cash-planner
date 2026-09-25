@@ -760,6 +760,27 @@ const H = require('../desktop/helper.js');
       /imp && !keepFigures \? removeImport\(imp\.id\)/.test(app));
   }
 
+  /* The "Get Amazon data" window: nothing is requested until the dates and
+     country have been shown and Download pressed. */
+  {
+    const fs14 = require('fs');
+    const p14 = (...a) => require('path').join(__dirname, '..', ...a);
+    const app = fs14.readFileSync(p14('lib', 'app.js'), 'utf8');
+    const helper = fs14.readFileSync(p14('worker', 'worker.py'), 'utf8');
+    const startAll = app.slice(app.indexOf('async function startAll()'), app.indexOf('function openGetWindow()'));
+    T.ok('the button opens the window instead of downloading straight away',
+      /return openGetWindow\(\);/.test(startAll) && !/return getTodaysData\(\);/.test(startAll));
+    T.ok('the window sends its own forecast and history dates',
+      /forecast: \(choice && choice\.forecast\) \|\| null/.test(app) && /history: \(choice && choice\.history\) \|\| null/.test(app));
+    T.ok('the forecast cannot start before tomorrow', /g\.fFrom < tomorrow/.test(app));
+    T.ok('the history cannot reach past today, and needs a country',
+      /g\.hTo > state\.today/.test(app) && /Choose at least one country/.test(app));
+    T.ok('the helper uses the window’s forecast dates as a custom range',
+      /if fc_win:[\s\S]{0,200}drange = "Custom date range"[\s\S]{0,40}dfrom, dto = fc_win/.test(helper));
+    T.ok('and the window’s history dates, never reaching the future',
+      /history_window\(\*\(hist_win or \(override_from, override_to\)\)\)/.test(helper));
+  }
+
   /* "Today", and the periods built on it. */
   {
     const fs10 = require('fs');

@@ -83,7 +83,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "4.9.28"
+HELPER_VERSION = "4.9.29"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -682,6 +682,18 @@ def imported_words(payload: dict) -> str:
     return "Imported %s of %s rows." % (got, seen)
 
 
+def iso_pair(win) -> tuple[str, str] | None:
+    """{from, to} as two real ISO dates in order, or None."""
+    if not isinstance(win, dict):
+        return None
+    try:
+        a = date.fromisoformat(str(win.get("from") or ""))
+        b = date.fromisoformat(str(win.get("to") or ""))
+    except ValueError:
+        return None
+    return (a.isoformat(), b.isoformat()) if a <= b else None
+
+
 def history_window(dfrom: str, dto: str, today: date | None = None) -> tuple[str, str] | None:
     """Can the period on screen be used for a HISTORY report?
 
@@ -1268,6 +1280,11 @@ class Handler(BaseHTTPRequestHandler):
             acct = payload.get("accountType") or settings.get("accountType")
             override_from = payload.get("from")
             override_to = payload.get("to")
+            # The download window's own dates, one pair per kind of report.
+            # They win over the page's period; anything not a real date is
+            # ignored rather than sent to Amazon.
+            fc_win = iso_pair(payload.get("forecast"))
+            hist_win = iso_pair(payload.get("history"))
 
             created, skipped, blocked = [], [], []
             for rt in REPORTS:
@@ -1277,8 +1294,8 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 spec = REPORTS[rt]
                 dfrom, dto = range_for(rt)
-                if override_from and override_to and spec["rangeKind"] == "historical":
-                    usable = history_window(override_from, override_to)
+                if spec["rangeKind"] == "historical" and (hist_win or (override_from and override_to)):
+                    usable = history_window(*(hist_win or (override_from, override_to)))
                     if usable:
                         dfrom, dto = usable
 
@@ -1294,7 +1311,13 @@ class Handler(BaseHTTPRequestHandler):
                     # whole point of choosing it. Without this the app promised
                     # the reporting period would be used and then quietly sent
                     # its own calculated window instead.
-                    if drange.strip().lower() == "custom date range"                             and override_from and override_to:
+                    if fc_win:
+                        # Dates chosen in the download window: typed into
+                        # Amazon's own From and To boxes.
+                        drange = "Custom date range"
+                        dfrom, dto = fc_win
+                    elif drange.strip().lower() == "custom date range" \
+                            and override_from and override_to:
                         dfrom, dto = override_from, override_to
                 else:
                     countries = mkts if spec.get("needsMarketplace") else [None]

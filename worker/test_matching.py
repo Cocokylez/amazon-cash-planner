@@ -561,6 +561,14 @@ _hf, _ht = W.range_for("date-range-transactions", _t)
 check("a HISTORICAL window still ends today", _ht, "2026-09-22")
 check("and looks backwards", _hf < _ht, True)
 
+# The download window's dates: real dates in order, or nothing.
+check("a date pair from the window is read", W.iso_pair({"from": "2026-09-26", "to": "2026-11-20"}),
+      ("2026-09-26", "2026-11-20"))
+check("a backwards pair is ignored", W.iso_pair({"from": "2026-11-20", "to": "2026-09-26"}), None)
+check("text that is not a date is ignored, never sent to Amazon",
+      W.iso_pair({"from": "tomorrow", "to": "2026-11-20"}), None)
+check("no window means no override", W.iso_pair(None), None)
+
 # What an import says it did. Never "Imported None of None rows".
 check("a normal import", W.imported_words({"rowsAccepted": 209, "rowsProcessed": 209}),
       "Imported 209 rows.")
