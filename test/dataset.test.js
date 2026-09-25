@@ -253,4 +253,34 @@ T.section('A fee family with no column is absent, not zero');
   T.eqMoney('and net sales still reads', f.netSales, '600.00');
 }
 
+/* ── the same forecast downloaded on three days counts once ──────────────── */
+
+T.section('Overlapping forecast downloads are versions, not additions');
+{
+  const head = ['Amazon store', 'Start date', 'End date', 'Parent ASIN', 'ASIN', 'FNSKU', 'MSKU',
+    'Currency code', 'Average sales price', 'Units sold', 'Units returned', 'Net units sold',
+    'Sales', 'Net sales'].join(',');
+  const file = (from, to, net, name, cur) => Preview.parse('﻿' + head + '\n'
+    + 'US,' + from + ',' + to + ',BP,B1,X1,SKU-A,' + (cur || 'USD') + ',25.00,10,0,10,' + net + ',' + net + '\n',
+    { name });
+  /* The shape in the bug report: a rolling eight-week window, fetched daily. */
+  const d24 = file('09/25/2026', '11/18/2026', '193652.04', 'mon.csv');
+  const d25 = file('09/25/2026', '11/19/2026', '198321.65', 'tue.csv');
+  const d26 = file('09/26/2026', '11/20/2026', '196510.62', 'wed.csv');
+  const three = Dataset.build({ previews: [d24, d25, d26] }).forecast;
+  T.eqMoney('three overlapping downloads count once - the newest', three.netSales, '196,510.62');
+  const act = Preview.active([d24, d25, d26]);
+  T.eq('the newest is the one starting latest', act.files.map(f => f.name).join(','), 'wed.csv');
+  T.eq('the older two are kept, marked as replaced', act.superseded.map(s => s.file.name + '>' + s.by.name).join(','),
+    'tue.csv>wed.csv,mon.csv>wed.csv');
+  /* Separate windows are separate estimates, and all of them count. */
+  const sep = file('09/17/2026', '09/30/2026', '100.00', 'sep.csv');
+  const oct = file('10/01/2026', '10/15/2026', '200.00', 'oct.csv');
+  T.eqMoney('windows that do not overlap all count', Dataset.build({ previews: [sep, oct] }).forecast.netSales, '300.00');
+  const cad = file('09/26/2026', '11/20/2026', '50.00', 'cad.csv', 'CAD');
+  T.eq('a different currency never replaces one', Preview.active([d26, cad]).files.length, 2);
+  T.eq('importing an older window later does not undo a newer one',
+    Preview.active([d26, d24]).files.map(f => f.name).join(','), 'wed.csv');
+}
+
 process.exit(T.report() ? 0 : 1);
