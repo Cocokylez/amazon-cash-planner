@@ -94,25 +94,73 @@ T.section('The chart reads what the tiles say');
 {
   const Charts = require('../lib/charts.js');
   const f = Simple.forecastFor([ten], '2026-10-01', '2026-10-12');
-  const run = Charts.forecastItems(f.daily, { metric: 'netSales', mode: 'running', mondayOf: Simple.mondayOf });
+  const run = Charts.forecastItems(f.daily, { metrics: ['netSales'], mode: 'running', mondayOf: Simple.mondayOf });
+  const end = run.items[run.items.length - 1];
   T.eq('a running total per day', run.items.length, 12);
-  T.eq('ends at the net sales tile', run.items[run.items.length - 1].v, f.netSales);
-  T.eq('and stays level across days with no forecast', run.items[11].v, run.items[9].v);
+  T.eq('ends at the net sales tile', end.vs.netSales, f.netSales);
+  T.eq('and stays level across days with no forecast', run.items[11].vs.netSales, run.items[9].vs.netSales);
   T.ok('which are marked as gaps', run.items[10].gap && run.items[11].gap && !run.items[9].gap);
-  const last = run.items[run.items.length - 1].rows;
-  T.eq('the reading gives all four, fees and ads as costs',
-    last.map(r => r[1]).join(','), [f.netSales, -f.feeTotal, -f.advertising, f.afterFeesAndAds].join(','));
-  T.eq('with the picked one marked', last.map(r => r[2] ? 1 : 0).join(''), '1000');
-  const wk = Charts.forecastItems(f.daily, { metric: 'after', mode: 'weekly', mondayOf: Simple.mondayOf });
+  T.eq('the reading gives all four to date, fees and ads as costs',
+    run.items[9].rows.map(r => r[2]).join(','), [f.netSales, -f.feeTotal, -f.advertising, f.afterFeesAndAds].join(','));
+  T.eq('and each one for that day', run.items[0].rows[0][1], f.daily[0].netSales);
+  T.eq('a day with no forecast reads as nothing that day', run.items[11].rows[0][1], null);
+  T.eq('with the picked one marked', end.rows.map(r => r[3] ? 1 : 0).join(''), '1000');
+
+  const two = Charts.forecastItems(f.daily, { metrics: ['fees', 'netSales'], mode: 'running' });
+  T.eq('several at once, in the tiles\u2019 order', two.measures.map(m => m.key).join(','), 'netSales,fees');
+  T.eq('each plotted to its own total', [two.items[11].vs.netSales, two.items[11].vs.fees].join(','),
+    [f.netSales, f.feeTotal].join(','));
+  T.eq('both marked in the reading', two.items[0].rows.map(r => r[3] ? 1 : 0).join(''), '1100');
+  const none = Charts.forecastItems(f.daily, { metrics: [], mode: 'running' });
+  T.eq('with none picked, net sales is shown rather than nothing', none.measures.map(m => m.key).join(), 'netSales');
+
+  const wk = Charts.forecastItems(f.daily, { metrics: ['after'], mode: 'weekly', mondayOf: Simple.mondayOf });
   T.eq('weekly: one entry per week (28 Sep, 5 Oct, 12 Oct)', wk.items.length, 3);
-  T.ok('the week with nothing downloaded is a gap, not zero', wk.items[2].gap && wk.items[2].v == null);
-  T.eq('the weeks add to the after-fees tile', wk.items.reduce((s, x) => s + (x.v || 0), 0), f.afterFeesAndAds);
-  const html = Charts.forecast(f.daily, { metric: 'fees', mode: 'running', mondayOf: Simple.mondayOf });
+  T.ok('the week with nothing downloaded is a gap, not zero', wk.items[2].gap && wk.items[2].vs.after == null);
+  T.eq('the weeks add to the after-fees tile', wk.items.reduce((s, x) => s + (x.vs.after || 0), 0), f.afterFeesAndAds);
+
+  const html = Charts.forecast(f.daily, { metrics: ['fees'], mode: 'running', mondayOf: Simple.mondayOf });
   T.ok('it draws, with a reading to hover', /class="fchart"/.test(html) && /data-fc=/.test(html)
     && /fc-tip/.test(html));
   T.ok('and shades the days with nothing downloaded', /url\(#fc-gap\)/.test(html));
+  const all = Charts.forecast(f.daily, { metrics: ['netSales', 'fees', 'advertising', 'after'], mode: 'running' });
+  T.eq('all four: four lines and a legend', [(all.match(/stroke-width="2.5" stroke-linejoin/g) || []).length,
+    /class="legend"/.test(all)].join(','), '4,true');
+  const bars = Charts.forecast(f.daily, { metrics: ['netSales', 'fees'], mode: 'weekly', mondayOf: Simple.mondayOf });
+  T.eq('weekly with two: side by side, two bars a covered week', (bars.match(/<path d="M[^"]*" fill="var\(--mark-[12]\)"/g) || []).length, 4);
   T.ok('with nothing downloaded it says so and draws nothing',
     /Nothing to draw yet/.test(Charts.forecast(Simple.forecastFor([], '2026-10-01', '2026-10-05').daily)));
+}
+
+T.section('What each product\u2019s fees are made of');
+{
+  /* 10 days: SKU-A $600 net, $90 referral, $120 FBA, $30 ads */
+  const f = Simple.forecastFor([ten], '2026-10-01', '2026-10-10');
+  const a = f.bySku.find(r => r.msku === 'SKU-A');
+  T.eqMoney('referral, for this product', a.feeBy['Referral fee'], '90.00');
+  T.eqMoney('FBA fulfilment, for this product', a.feeBy['FBA fulfillment fees'], '120.00');
+  T.eqMoney('its fees are the kinds added up', a.fees, '210.00');
+  T.eq('the products\u2019 fees add to the Amazon fees tile', f.bySku.reduce((s, r) => s + (r.fees || 0), 0), f.feeTotal);
+  const half = Simple.forecastFor([ten], '2026-10-01', '2026-10-05').bySku.find(r => r.msku === 'SKU-A');
+  T.eqMoney('part of a download: each kind split by day too', half.feeBy['FBA fulfillment fees'], '60.00');
+}
+
+T.section('Where net sales go: the bars say what the tiles say');
+{
+  const Charts = require('../lib/charts.js');
+  const html = Charts.spend([{ label: 'All products', netSales: 100000, parts: [
+    { name: 'FBA fulfillment fees', amount: 30000 }, { name: 'Referral fee', amount: 15000 },
+    { name: 'Advertising', amount: 5000 }] }], { share: true, currency: 'USD' });
+  T.eq('one piece per cost, and one for what is left', (html.match(/class="sp-seg"/g) || []).length, 4);
+  T.ok('each piece reads out its amount and share', /Left after fees and ads/.test(html) && /50\.0%/.test(html));
+  const loss = Charts.spend([{ label: 'SKU-X', netSales: 10000, parts: [{ name: 'FBA fulfillment fees', amount: 15000 }] }],
+    { share: true, label: true, currency: 'USD' });
+  T.ok('a product that costs more than it sells says so', /loses USD 50\.00/.test(loss));
+  T.ok('with nothing left to show', !/data-tip="[^"]*Left after fees and ads&quot;,&quot;USD 50/.test(loss));
+  const noSales = Charts.spend([{ label: 'SKU-Y', netSales: 0, parts: [{ name: 'Monthly inventory storage fee', amount: 1200 }] }],
+    { share: true, label: true, currency: 'USD' });
+  T.ok('fees with no sales are named, not drawn as a share', /No sales on these dates/.test(noSales));
+  T.ok('nothing at all: said, not drawn', /Nothing to show/.test(Charts.spend([], {})));
 }
 
 process.exit(T.report() ? 0 : 1);

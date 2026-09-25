@@ -796,9 +796,42 @@ const H = require('../desktop/helper.js');
     T.ok('the forecast screen reads the new calculation', /Simple\.forecastFor\(scoped, from, to\)/.test(app));
     T.ok('which the page loads', html.indexOf('<script src="lib/simple.js"></script>') > html.indexOf('lib/dataset.js')
       && html.indexOf('lib/simple.js') < html.indexOf('lib/app.js'));
+    const dataScreen = app.slice(app.indexOf('screens.data = function'), app.indexOf('screens.data = function') + 6000);
     T.ok('Downloads no longer asks for balances, rules, deposits, costs or ad billing',
-      !/html \+= depositsCard\(\);/.test(app) && !/id="payoutrules"/.test(app) && !/html \+= dataTiles\(ds\);/.test(app));
+      !/depositsCard\(\)|payoutRulesCard\(\)|dataTiles\(ds\)|costsCard\(\)|adsCard\(\)/.test(dataScreen));
+    const inputs = app.slice(app.indexOf('screens.inputs = function'), app.indexOf('screens.settings = function'));
+    T.ok('they are under More tools, each only while Settings has it on',
+      ['balance', 'rules', 'deposits', 'costs', 'ads'].every(k => inputs.indexOf('if (state.show.' + k + ')') >= 0));
+    T.ok('the payout rules card is the one 5.0 took out, not a rewrite', /function payoutRulesCard\(\)/.test(app)
+      && /Save the account rules/.test(app));
+    T.ok('More tools lists every screen 5.0 took out of the navigation',
+      /for \(const s of HIDDEN_SCREENS\)/.test(app) && /id="moretoggle"/.test(app));
+    T.ok('and Settings is always in the sidebar', /for \(const s of APP_SCREENS\)/.test(app)
+      && /id: 'settings'/.test(app));
+    T.ok('Settings has a switch for each of the five, and More tools',
+      /\{ key: 'balance'[\s\S]*key: 'rules'[\s\S]*key: 'deposits'[\s\S]*key: 'costs'[\s\S]*key: 'ads'/.test(app)
+      && /sw\('more', 'More tools'/.test(app));
+    T.ok('which are kept, and turning one off deletes nothing', /localStorage\.setItem\('fba-show-v1'/.test(app)
+      && /nothing you entered is deleted/.test(app));
     T.ok('the sidebar says what forecast is loaded, not a feature count', /\$\('#sidenote'\)\.innerHTML = forecastStatus\(\);/.test(app));
+  }
+
+  /* The guide: whole on a first install, what changed after an update. */
+  {
+    const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'app.js'), 'utf8');
+    const pkg = JSON.parse(require('fs').readFileSync(require('path').join(__dirname, '..', 'package.json'), 'utf8'));
+    const latest = (app.match(/\{ version: '(\d+\.\d+\.\d+)', steps:/g) || []).pop() || '';
+    T.ok('this version says what changed in it', latest.indexOf("'" + pkg.version + "'") >= 0);
+    T.ok('the guide starts by itself', /setTimeout\(guideBoot, \d+\)/.test(app));
+    T.ok('a copy already in use gets what changed, not the first-install guide',
+      /used \? \{ done: true, seen: '5\.0\.1' \} : \{ done: false, seen: null \}/.test(app));
+    T.ok('it waits for any window already open', /if \(state\.setupOpen \|\| state\.getWin\)/.test(app));
+    T.ok('a part not on screen is named, never pointed at', /if \(el && !el\.getClientRects\(\)\.length\) el = null;/.test(app));
+    const targets = (app.match(/target: '([^']+)'/g) || []).map(t => t.slice(9, -1));
+    const ids = targets.map(t => (t.match(/#([\w-]+)/) || [])[1]).filter(Boolean);
+    T.ok('every part it points at exists in the page', ids.every(id => app.indexOf('id="' + id + '"') >= 0
+      || app.indexOf("id=\"" + id) >= 0 || require('fs').readFileSync(require('path').join(__dirname, '..', 'app.html'), 'utf8')
+        .indexOf('id="' + id + '"') >= 0), ids.filter(id => app.indexOf('id="' + id + '"') < 0).join(','));
   }
 
   /* Notifications, and a forecast-only app. */
@@ -807,7 +840,8 @@ const H = require('../desktop/helper.js');
     const p15 = (...a) => require('path').join(__dirname, '..', ...a);
     const app = fs15.readFileSync(p15('lib', 'app.js'), 'utf8');
     const Dataset = require('../lib/dataset.js');
-    T.ok('a bell sits at the top of every screen', /let html = noticeBell\(\);/.test(app));
+    T.ok('a bell sits at the top of every screen, beside the guide',
+      /let html = guideButton\(\) \+ noticeBell\(\);/.test(app));
     T.ok('downloads report each change of state there', /noticeJobChanges\(\);/.test(app)
       && /'Complete: ' \+ name/.test(app) && /'Failed: ' \+ name/.test(app));
     T.ok('every import result goes there, receipt folded inside', /noticeForImport\(state\.lastImport\)/.test(app));
