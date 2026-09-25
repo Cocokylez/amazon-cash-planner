@@ -4,13 +4,13 @@
     {
       "name": "fba-cash-web",
       "runtimeExecutable": "node",
-      "runtimeArgs": ["D:/Projects/Apps/fba-profit-organizer-web/server.js"],
+      "runtimeArgs": ["D:/Projects/Apps/amazon-cash-planner/server.js"],
       "port": 5178
     },
     {
       "name": "design-mockup",
       "runtimeExecutable": "python",
-      "runtimeArgs": ["-m", "http.server", "5179", "--bind", "127.0.0.1", "--directory", "D:/Projects/Apps/fba-profit-organizer-web/design"],
+      "runtimeArgs": ["-m", "http.server", "5179", "--bind", "127.0.0.1", "--directory", "D:/Projects/Apps/_archive/fba-profit-organizer-web/design"],
       "port": 5179
     }
   ]

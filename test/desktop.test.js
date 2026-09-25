@@ -262,16 +262,22 @@ const H = require('../desktop/helper.js');
 
        Two languages, one answer. Asked of both, every run. */
     const { execFileSync } = require('node:child_process');
-    const py = path.join(__dirname, '..', 'worker', 'venv', 'Scripts', 'python.exe');
-    if (fs.existsSync(py)) {
-      const fromPython = execFileSync(py, ['-c',
-        'import sys; sys.path.insert(0, r"' + path.join(__dirname, '..', 'worker')
-        + '"); import paths; print(paths.data_dir())'],
-        { encoding: 'utf8' }).trim();
-      T.eq('the same folder, in both languages', H.dataDir(), fromPython);
-    } else {
-      T.ok('python environment present to compare against', false);
+    /* paths.py needs nothing but the standard library, so any Python will
+       do: the development environment if there is one, else the system's. */
+    const venvPy = path.join(__dirname, '..', 'worker', 'venv', 'Scripts', 'python.exe');
+    let fromPython = null;
+    for (const py of [venvPy, 'python', 'py']) {
+      if (py === venvPy && !fs.existsSync(py)) continue;
+      try {
+        fromPython = execFileSync(py, ['-c',
+          'import sys; sys.path.insert(0, r"' + path.join(__dirname, '..', 'worker')
+          + '"); import paths; print(paths.data_dir())'],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        break;
+      } catch (e) { /* try the next */ }
     }
+    if (fromPython != null) T.eq('the same folder, in both languages', H.dataDir(), fromPython);
+    else T.ok('a Python to compare against (none found on this computer)', false);
 
     /* And the override has to work in both, or a test run migrates a live
        installation as a side effect of importing a module. */
@@ -313,15 +319,23 @@ const H = require('../desktop/helper.js');
        When they disagree, a copy mistakes itself for a stranger - or worse,
        mistakes a stranger for itself. */
     const { execFileSync } = require('node:child_process');
-    const py = path.join(__dirname, '..', 'worker', 'venv', 'Scripts', 'python.exe');
-    if (fs.existsSync(py)) {
-      const fromPython = execFileSync(py, ['-c',
-        'import sys; sys.path.insert(0, r"' + path.join(__dirname, '..', 'worker')
-        + '"); import launch; print(launch.instance_id())'],
-        { encoding: 'utf8' }).trim();
+    /* Any Python: launch.py needs only the standard library to import. */
+    const venvPy = path.join(__dirname, '..', 'worker', 'venv', 'Scripts', 'python.exe');
+    let fromPython = null;
+    for (const py of [venvPy, 'python', 'py']) {
+      if (py === venvPy && !fs.existsSync(py)) continue;
+      try {
+        fromPython = execFileSync(py, ['-c',
+          'import sys; sys.path.insert(0, r"' + path.join(__dirname, '..', 'worker')
+          + '"); import launch; print(launch.instance_id())'],
+          { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        break;
+      } catch (e) { /* try the next */ }
+    }
+    if (fromPython != null) {
       T.eq('the installation id agrees across languages',
         H.instanceId(path.join(__dirname, '..')), fromPython);
-    }
+    } else T.ok('a Python to compare the installation id against (none found)', false);
   }
 
   {
