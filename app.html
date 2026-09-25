@@ -67,6 +67,8 @@
   --mark-1-soft: #CCFBF1;
   --mark-2:      #B45309;
   --mark-2-soft: #FEF3C7;
+  --mark-3:      #7C3AED;
+  --mark-4:      #2563EB;
   --mark-grid:   #EDF1F6;
   --mark-neutral:#94A3B8;
 
@@ -505,6 +507,30 @@ details[open] > summary { margin-bottom: 10px; }
 .key.solid { background: var(--mark-1); }
 .key.fc { background: var(--mark-1-soft); border: 1px dashed var(--mark-1); }
 .key.neg { background: var(--mark-2); }
+
+/* The forecast chart, and the reading that follows the pointer. */
+.fchart { position: relative; border-radius: 8px; }
+.fchart:focus-visible { outline-offset: 6px; }
+.fc-tip { position: absolute; top: 0; left: 0; z-index: 5; pointer-events: none; min-width: 250px;
+          background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+          box-shadow: var(--shadow-lift); padding: 10px 12px; font-size: var(--t-label); line-height: 1.5; }
+.fc-tip[hidden] { display: none; }
+.fc-tip .fc-h { font-weight: 600; color: var(--ink); margin-bottom: 6px; }
+.fc-tip .fc-r { display: flex; justify-content: space-between; gap: 18px; color: var(--ink-2); }
+.fc-tip .fc-r i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; }
+.fc-tip .fc-r b { font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums; }
+.fc-tip .fc-r b.neg { color: var(--error); }
+.fc-tip .fc-r.on, .fc-tip .fc-r.on b { color: var(--ink); font-weight: 700; }
+.fc-tip .fc-r.on b.neg { color: var(--error); }
+.fc-tip .fc-n { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--ink-2); }
+/* The forecast tiles are buttons: each picks what the chart shows. */
+.tile-btn { display: block; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer;
+            transition: border-color .15s ease, box-shadow .15s ease; }
+.tile-btn > span { display: block; }
+.tile-btn:hover { border-color: var(--line-2); box-shadow: var(--shadow-lift); }
+.tile-btn[aria-pressed="true"] { border-color: var(--fc); box-shadow: inset 0 3px 0 var(--fc); }
+.tile-btn .fc-key { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+                    background: var(--fc); margin-right: 8px; vertical-align: 0; }
 
 /* ── sidebar ───────────────────────────────────────────────────────────── */
 .brand-tile { display: inline-flex; align-items: center; justify-content: center; width: 28px;

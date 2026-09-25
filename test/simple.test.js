@@ -74,4 +74,45 @@ T.section('The same forecast downloaded twice counts once');
   T.eq('and the older is reported as replaced', f.superseded, 1);
 }
 
+T.section('Day by day, for the chart: whole cents that add back exactly');
+{
+  const sum = (a, k) => a.reduce((s, e) => s + (e[k] || 0), 0);
+  /* 3 of 10 days: $300.00 over 3 days, and an odd amount that does not divide */
+  const odd = file('10/01/2026', '10/07/2026', [['SKU-A', 7, '100.00', '10.01', '0.00', '0.00']], 'odd.csv');
+  const f = Simple.forecastFor([odd], '2026-10-01', '2026-10-07');
+  T.eq('one entry per day', f.daily.length, 7);
+  T.eq('net sales per day add to the total', sum(f.daily, 'netSales'), f.netSales);
+  T.eq('fees per day add to the total, odd cents and all', sum(f.daily, 'fees'), f.feeTotal);
+  T.ok('every day is whole cents', f.daily.every(e => Number.isInteger(e.netSales) && Number.isInteger(e.fees)));
+  const g = Simple.forecastFor([ten], '2026-10-08', '2026-10-13');
+  T.eq('days past the download are marked, not filled', g.daily.map(e => e.covered ? 1 : 0).join(''), '111000');
+  T.ok('and carry nothing', g.daily.slice(3).every(e => e.netSales == null));
+  T.eq('the covered days add to the total', sum(g.daily, 'netSales'), g.netSales);
+}
+
+T.section('The chart reads what the tiles say');
+{
+  const Charts = require('../lib/charts.js');
+  const f = Simple.forecastFor([ten], '2026-10-01', '2026-10-12');
+  const run = Charts.forecastItems(f.daily, { metric: 'netSales', mode: 'running', mondayOf: Simple.mondayOf });
+  T.eq('a running total per day', run.items.length, 12);
+  T.eq('ends at the net sales tile', run.items[run.items.length - 1].v, f.netSales);
+  T.eq('and stays level across days with no forecast', run.items[11].v, run.items[9].v);
+  T.ok('which are marked as gaps', run.items[10].gap && run.items[11].gap && !run.items[9].gap);
+  const last = run.items[run.items.length - 1].rows;
+  T.eq('the reading gives all four, fees and ads as costs',
+    last.map(r => r[1]).join(','), [f.netSales, -f.feeTotal, -f.advertising, f.afterFeesAndAds].join(','));
+  T.eq('with the picked one marked', last.map(r => r[2] ? 1 : 0).join(''), '1000');
+  const wk = Charts.forecastItems(f.daily, { metric: 'after', mode: 'weekly', mondayOf: Simple.mondayOf });
+  T.eq('weekly: one entry per week (28 Sep, 5 Oct, 12 Oct)', wk.items.length, 3);
+  T.ok('the week with nothing downloaded is a gap, not zero', wk.items[2].gap && wk.items[2].v == null);
+  T.eq('the weeks add to the after-fees tile', wk.items.reduce((s, x) => s + (x.v || 0), 0), f.afterFeesAndAds);
+  const html = Charts.forecast(f.daily, { metric: 'fees', mode: 'running', mondayOf: Simple.mondayOf });
+  T.ok('it draws, with a reading to hover', /class="fchart"/.test(html) && /data-fc=/.test(html)
+    && /fc-tip/.test(html));
+  T.ok('and shades the days with nothing downloaded', /url\(#fc-gap\)/.test(html));
+  T.ok('with nothing downloaded it says so and draws nothing',
+    /Nothing to draw yet/.test(Charts.forecast(Simple.forecastFor([], '2026-10-01', '2026-10-05').daily)));
+}
+
 process.exit(T.report() ? 0 : 1);
