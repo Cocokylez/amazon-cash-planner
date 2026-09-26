@@ -39,6 +39,8 @@ contextBridge.exposeInMainWorld('desktopShell', {
   startup: on => ipcRenderer.invoke('shell:startup', typeof on === 'boolean' ? on : undefined),
   busy: on => ipcRenderer.invoke('shell:busy', !!on),
   show: () => ipcRenderer.invoke('shell:show'),
+  /* Appearance: 'system', 'light' or 'dark', for the window frame. */
+  theme: t => ipcRenderer.invoke('shell:theme', String(t || '')),
   onScheduleRun(handler) {
     ipcRenderer.on('schedule:run', () => { if (typeof handler === 'function') handler(); });
   },

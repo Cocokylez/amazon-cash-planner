@@ -124,7 +124,7 @@ T.section('The chart reads what the tiles say');
     && /fc-tip/.test(html));
   T.ok('and shades the days with nothing downloaded', /url\(#fc-gap\)/.test(html));
   const all = Charts.forecast(f.daily, { metrics: ['netSales', 'fees', 'advertising', 'after'], mode: 'running' });
-  T.eq('all four: four lines and a legend', [(all.match(/stroke-width="2.5" stroke-linejoin/g) || []).length,
+  T.eq('all four: four lines and a legend', [(all.match(/stroke-width="2" stroke-linejoin/g) || []).length,
     /class="legend"/.test(all)].join(','), '4,true');
   const bars = Charts.forecast(f.daily, { metrics: ['netSales', 'fees'], mode: 'weekly', mondayOf: Simple.mondayOf });
   T.eq('weekly with two: side by side, two bars a covered week', (bars.match(/<path d="M[^"]*" fill="var\(--mark-[12]\)"/g) || []).length, 4);
@@ -167,6 +167,48 @@ T.section('Where net sales go: the bars say what the tiles say');
     { share: true, label: true, currency: 'USD' });
   T.ok('fees with no sales are named, not drawn as a share', /No sales on these dates/.test(noSales));
   T.ok('nothing at all: said, not drawn', /Nothing to show/.test(Charts.spend([], {})));
+}
+
+T.section('Ledger (6.0): every dollar of net sales as one bar, and a row per product');
+{
+  const Charts = require('../lib/charts.js');
+  const row = { label: 'All products', netSales: 100000, parts: [
+    { name: 'FBA fulfillment fees', amount: 30000 }, { name: 'Referral fee', amount: 15000 },
+    { name: 'Closing fee', amount: 1000 }, { name: 'Advertising', amount: 5000 }] };
+  const bar = Charts.shareBar(row, { currency: 'USD' });
+  const flex = [...bar.matchAll(/class="stacked-bar__seg" style="flex:([\d.]+) 1 0/g)].map(m => +m[1]);
+  T.eq('one piece per cost, and one for what is left', flex.length, 5);
+  T.eq('the pieces are shares of the whole dollar', Math.round(flex.reduce((a, b) => a + b, 0)), 1000);
+  T.ok('big pieces are named under the bar, with their share', /FBA fulfillment<b>30\.0%<\/b>/.test(bar)
+    && /Left<b>49\.0%<\/b>/.test(bar));
+  T.ok('a sliver is not labelled (it would not fit)', !/Closing<b>/.test(bar));
+  T.ok('every piece reads out, the one under the pointer in bold',
+    /data-tip="[^"]*Referral fee&quot;,&quot;-\$150\.00&quot;,&quot;15\.0%&quot;,true/.test(bar));
+  const over = Charts.shareBar({ label: 'x', netSales: 10000, parts: [{ name: 'Advertising', amount: 15000 }] },
+    { currency: 'USD' });
+  T.ok('costs past the sales: said in words, nothing left over', /\$50\.00 more than the sales/.test(over)
+    && !/Left after fees and ads&quot;,&quot;\$/.test(over.split('data-tip')[0]));
+
+  const rows = [
+    { label: 'SKU-A', sub: 'B0A', netSales: 100000, parts: [{ name: 'FBA fulfillment fees', amount: 30000 }] },
+    { label: 'SKU-B', sub: 'B0B', netSales: 10000, parts: [{ name: 'FBA fulfillment fees', amount: 15000 }] },
+    { label: 'SKU-C', netSales: 0, parts: [{ name: 'Monthly inventory storage fee', amount: 1200 }] },
+  ];
+  const share = Charts.productRows(rows, { currency: 'USD', share: true, picked: 'SKU-B' });
+  T.eq('a row per product, each one it can follow', (share.match(/class="product-row"/g) || []).length, 3);
+  T.ok('the one the chart follows is selected', /aria-selected="true" data-sku="SKU-B"/.test(share)
+    && /aria-selected="false" data-sku="SKU-A"/.test(share));
+  const marks = [...share.matchAll(/product-row__marker" style="left:([\d.]+)%/g)].map(m => +m[1]);
+  T.eq('shares: every product’s net sales end at the same mark', [marks.length, new Set(marks).size], [2, 1]);
+  T.ok('a product costing 150% runs past it and says so', /loses \$50\.00/.test(share) && /costs 150\.0%/.test(share));
+  T.ok('fees with no sales are named, not drawn as a share', /No sales on these dates/.test(share));
+  const amounts = Charts.productRows(rows, { currency: 'USD', share: false });
+  const widths = [...amounts.matchAll(/product-row__bar" style="width:([\d.]+)%/g)].map(m => +m[1]);
+  T.eq('amounts: one money scale, the biggest product the full width', widths[0], 100);
+  T.ok('and a small one small', widths[1] < 20);
+  T.ok('nothing at all: said, not drawn', /Nothing to show/.test(Charts.productRows([], {})));
+  T.eq('fees keep their Ledger colours', [Charts.feeColour('Referral fee'), Charts.feeColour('Something new', 1)].join(' '),
+    'var(--fee-referral) var(--fee-spare-2)');
 }
 
 T.section('Fees against net sales, day by day: every line adds back to its total');
@@ -216,7 +258,7 @@ T.section('Zoom, and every line named');
   const labs = [...four.matchAll(/<text class="ch-lab" x="[^"]+" y="([^"]+)"/g)].map(m => +m[1]).sort((a, b) => a - b);
   T.eq('four lines, four names at their ends', labs.length, 4);
   T.ok('never on top of each other', labs.every((y, i) => !i || y - labs[i - 1] >= 16.9));
-  T.ok('after fees and ads is dashed, so a line under it shows', /stroke="var\(--mark-4\)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="9 5"/.test(four));
+  T.ok('after fees and ads is dashed, so a line under it shows', /stroke="var\(--mark-4\)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="9 5"/.test(four));
   const wk = Charts.forecast(f.daily, { metrics: ['netSales'], mode: 'weekly', mondayOf: Simple.mondayOf,
     zoom: { from: '2026-10-05', to: '2026-10-11' } });
   T.eq('weekly zoom keeps whole weeks', itemsOf(wk).map(x => x.from).join(), '2026-10-05');

@@ -508,8 +508,12 @@ const H = require('../desktop/helper.js');
 
     T.ok('the page has a slot for the update notice',
       html.includes('id="updatebar"'));
-    T.ok('and it sits above the header, not inside a panel',
-      html.indexOf('id="updatebar"') < html.indexOf('<header id="top"'));
+    /* 6.0 (Ledger): straight under the toolbar - the toolbar is the window's
+       title bar now, with Windows' buttons over its end - and above the page. */
+    T.ok('and it sits at the top of every page, not inside a panel',
+      html.indexOf('<header id="top"') < html.indexOf('id="updatebar"')
+      && html.indexOf('id="updatebar"') < html.indexOf('id="largetitle"')
+      && html.indexOf('id="updatebar"') < html.indexOf('id="view"'));
     T.ok('an empty slot takes up no room',
       html.includes('#updatebar:empty { display: none; }'));
 
@@ -973,6 +977,41 @@ const H = require('../desktop/helper.js');
     T.eq('on the 24th, "Next 8 weeks" is the 25th to 19 Nov',
       next8 && [CSV.addDays('2026-09-24', +next8[1]), CSV.addDays('2026-09-24', +next8[2])].join(' '),
       '2026-09-25 2026-11-19');
+  }
+
+  T.section('Ledger (6.0): the look, light and dark, and a quiet install');
+  {
+    const fsL = require('fs'), pL = (...a) => require('path').join(__dirname, '..', ...a);
+    const main = fsL.readFileSync(pL('desktop', 'main.js'), 'utf8');
+    const pre = fsL.readFileSync(pL('desktop', 'app-preload.js'), 'utf8');
+    const app = fsL.readFileSync(pL('lib', 'app.js'), 'utf8');
+    const html = fsL.readFileSync(pL('app.html'), 'utf8');
+    const status = fsL.readFileSync(pL('desktop', 'status.html'), 'utf8');
+    T.ok('the page is a standards-mode page, in UTF-8', /^<!doctype html>/i.test(html) && /<meta charset="utf-8">/.test(html));
+    T.ok('every colour has a dark twin', /--bg-window:\s+light-dark\(/.test(html)
+      && /:root\[data-theme="dark"\]\s*\{ color-scheme: dark; \}/.test(html));
+    T.ok('the theme is taken only from the app window, and only a known one',
+      /ipcMain\.handle\('shell:theme'[\s\S]{0,120}fromAppWindow\(event\) \|\| !THEMES\.includes\(t\)/.test(main));
+    T.ok('the page tells the shell, and sets its own', /theme: t => ipcRenderer\.invoke\('shell:theme'/.test(pre)
+      && /window\.desktopShell\.theme\(t\)/.test(app) && /setAttribute\('data-theme', t\)/.test(app));
+    T.ok('the theme is applied before the first drawing', /boot\(\) \{\s*applyTheme\(state\.theme\);/.test(app));
+    T.ok('the title bar is the page’s, with Windows’ own buttons over it',
+      /titleBarStyle: 'hidden', titleBarOverlay: c/.test(main) && /nativeTheme\.on\('updated', paintCaptions\)/.test(main));
+    T.ok('the toolbar is where the window is dragged from, and its buttons still click',
+      /#top \{[^}]*-webkit-app-region: drag/.test(html) && /#top button[^{]*\{[^}]*-webkit-app-region: no-drag/.test(html));
+    T.ok('and it keeps clear of the window buttons', /padding: 8px var\(--cap-r\)/.test(html)
+      && /--cap-r: clamp\(16px, calc\(100vw - env\(titlebar-area-x[^;]*, 200px\)/.test(html));
+    T.ok('download progress reaches the page', /updates\.percent = /.test(main) && /u\.percent/.test(app));
+    T.ok('installing: the page says so, in its own look, before the window goes',
+      /state\.installing = u\.readyVersion/.test(app) && /Installing Ledger/.test(app)
+      && /setTimeout\(\(\) => autoUpdater\.quitAndInstall\(true, true\), \d+\)/.test(main));
+    T.ok('an install that cannot start yet is said, not alerted', /state\.installHeld = r\.detail/.test(app)
+      && !/alert\(r\.detail/.test(app));
+    T.ok('the loading window is Ledger’s, light and dark', /light-dark\(/.test(status)
+      && /<h1>Ledger<\/h1>/.test(status) && /-webkit-app-region: drag/.test(status));
+    T.ok('and makes no claim about where the figures are kept', !/stay on this computer/.test(status));
+    T.ok('the new guide notes point at things that exist', /version: '6\.0\.0'/.test(app)
+      && app.includes('id="appearancecard"'));
   }
 
   T.report();

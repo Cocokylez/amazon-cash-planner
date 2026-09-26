@@ -11,7 +11,8 @@
  */
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, powerSaveBlocker } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, powerSaveBlocker,
+  nativeTheme } = require('electron');
 const { spawn } = require('child_process');
 const os = require('os');
 const http = require('http');
@@ -87,6 +88,40 @@ let statusWindow = null;
 let appWindow = null;
 let weStartedIt = false;
 
+/* ── appearance ─────────────────────────────────────────────────────────
+
+   Ledger draws its own title bar: the page's toolbar runs to the top of the
+   window, and Windows' own minimise, maximise and close are drawn over its
+   right-hand end in the page's colours. The choice of System, Light or Dark
+   is the page's (Settings); it is kept in a file beside the log as well, so
+   the loading window - which opens before the page exists - matches it. */
+const THEMES = ['system', 'light', 'dark'];
+const themeFile = () => path.join(H.dataDir(), 'theme.json');
+function readTheme() {
+  try {
+    const t = JSON.parse(fs.readFileSync(themeFile(), 'utf8')).theme;
+    return THEMES.includes(t) ? t : 'system';
+  } catch (e) { return 'system'; }
+}
+function captionColours() {
+  const dark = nativeTheme.shouldUseDarkColors;
+  return { color: dark ? '#161618' : '#F5F5F7', symbolColor: dark ? '#F5F5F7' : '#1D1D1F', height: 40 };
+}
+/* Every window's frame: no title bar of its own, Windows' buttons over the
+   page, and the page's background while it loads (no white flash in dark). */
+function windowChrome() {
+  const c = captionColours();
+  return { titleBarStyle: 'hidden', titleBarOverlay: c, backgroundColor: c.color };
+}
+function paintCaptions() {
+  const c = captionColours();
+  for (const w of [appWindow, statusWindow]) {
+    if (!w || w.isDestroyed()) continue;
+    try { w.setTitleBarOverlay(c); } catch (e) { /* no overlay on this platform */ }
+    try { w.setBackgroundColor(c.color); } catch (e) { /* cosmetic */ }
+  }
+}
+
 /* ── running in the background ──────────────────────────────────────────
 
    The daily download runs at 6 in the morning, so the app can start with
@@ -127,9 +162,9 @@ function ensureTray() {
     const img = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png'));
     tray = new Tray(img.isEmpty() ? img : img.resize({ width: 16, height: 16 }));
   } catch (e) { tray = null; return; }
-  tray.setToolTip('Amazon Cash Planner');
+  tray.setToolTip('Ledger');
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Amazon Cash Planner', click: showApp },
+    { label: 'Open Ledger', click: showApp },
     { label: 'Download today\u2019s forecast now',
       click: () => { if (appWindow) appWindow.webContents.send('schedule:run'); } },
     { type: 'separator' },
@@ -139,14 +174,15 @@ function ensureTray() {
 }
 
 function createStatusWindow() {
-  statusWindow = new BrowserWindow({
-    width: 520, height: 320, resizable: false, show: !HIDDEN,
-    title: 'Amazon Cash Planner',
+  statusWindow = new BrowserWindow(Object.assign({
+    width: 480, height: 340, resizable: false, maximizable: false, show: !HIDDEN,
+    title: 'Ledger',
+  }, windowChrome(), {
     webPreferences: {
       contextIsolation: true, nodeIntegration: false, sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-  });
+  }));
   statusWindow.removeMenu();
   statusWindow.on('closed', () => { statusWindow = null; });
 
@@ -184,9 +220,10 @@ function say(text, kind, action) {
 }
 
 function openApp(url) {
-  appWindow = new BrowserWindow({
-    width: 1400, height: 950, show: false,
-    title: 'Amazon Cash Planner',
+  appWindow = new BrowserWindow(Object.assign({
+    width: 1400, height: 950, minWidth: 720, minHeight: 520, show: false,
+    title: 'Ledger',
+  }, windowChrome(), {
     webPreferences: {
       contextIsolation: true, nodeIntegration: false, sandbox: true,
       /* Three read-only facts, and nothing else. See app-preload.js. */
@@ -196,7 +233,7 @@ function openApp(url) {
          which would stretch a one-hour run into several. */
       backgroundThrottling: false,
     },
-  });
+  }));
   appWindow.removeMenu();
 
   /* This window shows one thing: the local app. A page that tried to send it
@@ -575,6 +612,8 @@ const updates = {
   checkedAt: null,
   ready: false,            // downloaded and waiting to be applied
   readyVersion: '',
+  version: '',             // the version being downloaded
+  percent: null,           // how much of it has arrived, 0-100
 };
 
 function setUpdateState(state, detail) {
@@ -615,12 +654,24 @@ ipcMain.handle('shell:startup', (event, on) => {
 ipcMain.handle('shell:busy', (event, on) => {
   if (on && keepAwake === null) keepAwake = powerSaveBlocker.start('prevent-app-suspension');
   if (!on && keepAwake !== null) { powerSaveBlocker.stop(keepAwake); keepAwake = null; }
-  if (tray) tray.setToolTip(on ? 'Amazon Cash Planner \u2014 downloading today\u2019s forecast'
-    : 'Amazon Cash Planner');
+  if (tray) tray.setToolTip(on ? 'Ledger \u2014 downloading today\u2019s forecast' : 'Ledger');
   return !!on;
 });
 
 ipcMain.handle('shell:show', () => { showApp(); return true; });
+
+/* The page's Appearance setting: applied to the window frame at once, and
+   kept for the loading window next time. Only the app window may set it. */
+ipcMain.handle('shell:theme', (event, t) => {
+  if (!fromAppWindow(event) || !THEMES.includes(t)) return readTheme();
+  if (nativeTheme.themeSource !== t) nativeTheme.themeSource = t;
+  try {
+    fs.mkdirSync(H.dataDir(), { recursive: true });
+    fs.writeFileSync(themeFile(), JSON.stringify({ theme: t }));
+  } catch (e) { /* this session only */ }
+  paintCaptions();
+  return t;
+});
 
 ipcMain.handle('shell:info', () => shellInfo());
 ipcMain.handle('shell:check-updates', async () => {
@@ -646,9 +697,11 @@ ipcMain.handle('shell:install-update', async () => {
   }
   logLine('installing update ' + updates.readyVersion);
   const { autoUpdater } = require('electron-updater');
-  /* isSilent false, isForceRunAfter true: the installer is visible, and the
-     app comes back by itself rather than leaving someone looking at nothing. */
-  setImmediate(() => autoUpdater.quitAndInstall(false, true));
+  /* isSilent true, isForceRunAfter true: the page has already said it is
+     installing (its own sheet, in its own look), the installer runs without
+     a window of its own, and the app opens again by itself. A little later
+     than the reply, so the sheet is on screen before the window goes. */
+  setTimeout(() => autoUpdater.quitAndInstall(true, true), 900);
   return { ok: true };
 });
 
@@ -689,9 +742,16 @@ function checkForUpdates() {
 
   autoUpdater.removeAllListeners();
   autoUpdater.on('update-not-available', () => report('current', 'none'));
-  autoUpdater.on('update-available', () => report('available', 'found'));
-  autoUpdater.on('download-progress', p => setUpdateState('available',
-    'Downloading the update: ' + Math.round(p.percent || 0) + '%'));
+  autoUpdater.on('update-available', info => {
+    updates.version = (info && info.version) || '';
+    updates.percent = 0;
+    report('available', 'found');
+  });
+  autoUpdater.on('download-progress', p => {
+    updates.percent = Math.max(0, Math.min(100, Math.round((p && p.percent) || 0)));
+    setUpdateState('available', 'Downloading ' + (updates.version ? 'Ledger ' + updates.version : 'the update')
+      + ': ' + updates.percent + '%');
+  });
   autoUpdater.on('update-downloaded', info => {
     updates.ready = true;
     updates.readyVersion = (info && info.version) || '';
@@ -717,7 +777,11 @@ function checkForUpdates() {
   }
 }
 
-app.whenReady().then(() => { if (primary) boot(); });
+app.whenReady().then(() => {
+  nativeTheme.themeSource = readTheme();
+  nativeTheme.on('updated', paintCaptions);
+  if (primary) boot();
+});
 
 app.on('window-all-closed', async () => {
   const cfg = readConfig();
