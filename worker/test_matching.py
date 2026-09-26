@@ -2271,9 +2271,13 @@ check("a chunk of an imported file is stored under its own path", SB.doc_get(_dh
 SB.doc_delete(_dh, _ck)
 check("and can be removed", SB.doc_get(_dh, _ck), None)
 check("every request used the secret key", set(_Docs.keys), {"sb_secret_" + "y" * 30})
+_ls = "data/users/owner/lease"
+SB.doc_set(_dh, _ls, {"device": "dev-a", "date": "2026-09-27", "status": "running"})
+check("the note of who runs this morning's download is kept", SB.doc_get(_dh, _ls)["device"], "dev-a")
 
 for _bad in ["data/users/owner/../../etc", "data/users/someone/state", "reports", "",
-             "data/users/owner/blobs/a/b/c0", "data/users/owner/state?x=1"]:
+             "data/users/owner/blobs/a/b/c0", "data/users/owner/state?x=1",
+             "data/users/owner/lease/x", "data/users/someone/lease"]:
     try:
         SB.doc_get(_dh, _bad)
         check("refused before any request: %r" % _bad, "sent", "refused")

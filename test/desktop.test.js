@@ -857,7 +857,7 @@ const H = require('../desktop/helper.js');
     const main = fs3.readFileSync(p3('desktop', 'main.js'), 'utf8');
     const run = app.slice(app.indexOf('async function runSchedule('), app.indexOf('function markScheduled('));
     T.ok('one report at a time: each is waited for before the next is asked for',
-      /for \(let n = 0; n < windows\.length; n\+\+\)[\s\S]{0,400}await fetchWindow\(w\)/.test(run));
+      /for \(let n = 0; n < windows\.length; n\+\+\)[\s\S]{0,1400}await fetchWindow\(w\)/.test(run));
     T.ok('with a pause between them', /await pause\(cfg\.gapSeconds \* 1000\)/.test(run));
     T.ok('a sign-in, CAPTCHA or check stops it and tells the person',
       /j\.status === 'login-required'[\s\S]{0,300}needsYou\(/.test(run));
@@ -878,6 +878,29 @@ const H = require('../desktop/helper.js');
       && /powerSaveBlocker\.stop\(keepAwake\)/.test(main));
     T.ok('a started-by-Windows copy shows itself when something needs the person',
       /if \(HIDDEN && kind && kind !== 'working'/.test(main));
+  }
+
+  /* Several computers, one morning download. */
+  {
+    const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'app.js'), 'utf8');
+    const take = app.slice(app.indexOf('async function takeLease('), app.indexOf('async function keepLease('));
+    T.ok('a computer writes its name, waits, and reads it back before going ahead',
+      /writeLease\(/.test(take) && /await pause\(/.test(take) && /back\.device !== me/.test(take));
+    T.ok('a live run on another computer makes this one stand down', /cur\.status === 'running' && leaseFresh\(cur\)/.test(take));
+    T.ok('and one already done there today is not done again (unless asked by hand)',
+      /other && cur\.status !== 'running' && !byHand/.test(take));
+    const run = app.slice(app.indexOf('async function runSchedule('), app.indexOf('async function fetchWindow('));
+    T.ok('before every report: still ours?', /if \(!\(await keepLease\(today\)\)\)/.test(run));
+    T.ok('and a date another computer already fetched is skipped',
+      /await syncPull\(\);\s*if \(scheduleDoneToday\(today\)\.has\(Schedule\.key\(w\)\)\)/.test(run));
+    T.ok('the note is let go at the end', /await releaseLease\(today, run\.status\)/.test(run));
+    T.ok('a duplicate that slipped through is cleared from this helper and Supabase too',
+      /letGo\.has\(j\.jobId\) && j\.scheduled[\s\S]{0,200}state\.worker\.remove\(j\.jobId\)/.test(app));
+    T.ok('if the computer set to run it has not, two hours on another steps in', /standInTime\(cfg\.time\)/.test(app)
+      && /runSchedule\('stand-in'\)/.test(app));
+    T.ok('standing in only where computers can see each other', /const supportsStandIn = \(\) => canShare\(\);/.test(app));
+    const sb = require('fs').readFileSync(require('path').join(__dirname, '..', 'worker', 'supabase.py'), 'utf8');
+    T.ok('the helper keeps that note, and nothing else new', /\(state\|lease\|blobs/.test(sb));
   }
 
   /* The guide: whole on a first install, what changed after an update. */

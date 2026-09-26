@@ -863,9 +863,11 @@ def sync(here: Path, db_path: Path, archive=None, log=None) -> dict:
 # ---------------------------------------------------------------------------
 
 # Exactly the paths lib/sync.js writes, for the one owner of this project.
-# Anything else is refused before a request is made.
+# Anything else is refused before a request is made. "lease" is the note that
+# says which computer is running this morning's download, so no other one
+# asks Amazon for the same reports.
 DOC_PATH = re.compile(
-    r"^data/users/owner/(state|blobs(/[A-Za-z0-9_\-.~:@+]{1,180}/c\d{1,4})?)$")
+    r"^data/users/owner/(state|lease|blobs(/[A-Za-z0-9_\-.~:@+]{1,180}/c\d{1,4})?)$")
 DOC_MAX_BYTES = 400 * 1024
 
 
