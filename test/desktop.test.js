@@ -856,9 +856,15 @@ const H = require('../desktop/helper.js');
     const app = fs3.readFileSync(p3('lib', 'app.js'), 'utf8');
     const main = fs3.readFileSync(p3('desktop', 'main.js'), 'utf8');
     const run = app.slice(app.indexOf('async function runSchedule('), app.indexOf('function markScheduled('));
-    T.ok('one report at a time: each is waited for before the next is asked for',
-      /for \(let n = 0; n < windows\.length; n\+\+\)[\s\S]{0,1400}await fetchWindow\(w\)/.test(run));
-    T.ok('with a pause between them', /await pause\(cfg\.gapSeconds \* 1000\)/.test(run));
+    T.ok('in batches: up to a set number asked for, one after another, then collected',
+      /for \(let b = 0; b < windows\.length && run\.status !== 'stopping'; b \+= cfg\.batchSize\)/.test(run)
+      && /const r = await askWindow\(w\);/.test(run) && /const r = await collectWindow\(x\.jobId, x\.w\);/.test(run));
+    T.ok('each request waited for before the next, with a pause between them',
+      /await pause\(cfg\.askGapSeconds \* 1000\)/.test(run) && /await pause\(cfg\.gapSeconds \* 1000\)/.test(run));
+    T.ok('asking stops once Amazon has the request; collecting uses the saved ticket',
+      /requestOnly: true/.test(run) && /state\.worker\.collect\(jobId\)/.test(run));
+    const sk = fs3.readFileSync(p3('worker', 'sku_economics.py'), 'utf8');
+    T.ok('the driver stops after Generate when asked only', /if request_only:\s*progress\("requested"/.test(sk));
     T.ok('a sign-in, CAPTCHA or check stops it and tells the person',
       /j\.status === 'login-required'[\s\S]{0,300}needsYou\(/.test(run));
     T.ok('and nobody there: it waits for Continue rather than trying the rest', /await waitForContinue\(\)/.test(run));

@@ -83,7 +83,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "5.5.0"
+HELPER_VERSION = "5.6.0"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -169,6 +169,9 @@ def is_public_file(rel: str, target: Path) -> bool:
 STATUSES = [
     "queued", "login-required", "requesting", "generating",
     "downloading", "validating", "importing", "complete", "failed", "cancelled",
+    # Asked for, and Amazon is building it; collected later (/collect). Not in
+    # the browser, so a restart leaves it exactly as it is.
+    "requested",
 ]
 # The states in which a report is using the browser this very moment.
 IN_BROWSER = ("login-required", "requesting", "generating", "downloading")
@@ -815,6 +818,9 @@ def run_job(job_id: str) -> None:
                 # the same period.
                 ticket=job.get("ticket"),
                 save_ticket=lambda t: JOBS.update(job_id, ticket=t),
+                # Ask only, collect later - unless it was already asked for.
+                request_only=bool(job.get("requestOnly"))
+                and not (job.get("ticket") or {}).get("requestedAt"),
             )
         else:
             result = download_report(
@@ -834,6 +840,11 @@ def run_job(job_id: str) -> None:
         JOBS.update(job_id, status="failed", finishedAt=now(),
                     lastError=_plain_failure(exc),
                     statusDetail="The download did not complete.")
+        return
+
+    if result.get("requested"):
+        JOBS.update(job_id, status="requested",
+                    statusDetail="Asked Amazon for it. It is collected once Amazon has built it.")
         return
 
     if result.get("loginRequired"):
@@ -1307,6 +1318,8 @@ class Handler(BaseHTTPRequestHandler):
             # The daily schedule: always a fresh report, and marked as its own.
             fresh = bool(payload.get("fresh"))
             scheduled = payload.get("scheduled")
+            # Ask now, collect later (/api/jobs/<id>/collect).
+            request_only = bool(payload.get("requestOnly"))
 
             created, skipped, blocked = [], [], []
             # The reports this press asked for. The app sends only the
@@ -1364,6 +1377,8 @@ class Handler(BaseHTTPRequestHandler):
                     elif job.get("reused"):
                         skipped.append(job)
                     else:
+                        if request_only:
+                            job = JOBS.update(job["jobId"], requestOnly=True) or job
                         WORK_QUEUE.put(job["jobId"])
                         created.append(job)
             return self._json({"created": created, "alreadyRunning": skipped,
@@ -1639,6 +1654,22 @@ class Handler(BaseHTTPRequestHandler):
                         "from it is still in the app and is removed from "
                         "Imported files.",
             })
+
+        if parsed.path.endswith("/collect"):
+            # Amazon has had it since it was asked for: fetch it now. The
+            # ticket takes the driver straight to watching the Generated
+            # Reports list - nothing is requested again.
+            job_id = parsed.path.split("/")[3]
+            job = JOBS.get(job_id)
+            if not job:
+                return self._json({"error": "not found"}, 404)
+            if job["status"] != "requested":
+                return self._json({"error": "This report is %s, not waiting to be collected."
+                                   % job["status"]}, 409)
+            JOBS.update(job_id, status="queued", requestOnly=False,
+                        statusDetail="Collecting the report Amazon built.")
+            WORK_QUEUE.put(job_id)
+            return self._json(JOBS.get(job_id))
 
         if parsed.path.endswith("/retry"):
             job_id = parsed.path.split("/")[3]

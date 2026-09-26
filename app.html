@@ -551,6 +551,13 @@ details[open] > summary { margin-bottom: 10px; }
 .spbar { height: 10px; border-radius: 5px; background: var(--surface-alt); overflow: hidden; }
 .spbar i { display: block; height: 100%; border-radius: 5px; }
 .dotkey { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; }
+/* the forecast's dates: From, To, and the arrows */
+.daterow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 16px; align-items: end; }
+.daterow .field { margin: 0; }
+@media (max-width: 640px) { .daterow { grid-template-columns: 1fr 1fr; } }
+/* and a bar to scroll them across everything downloaded */
+.scrollrow { display: flex; align-items: center; gap: 12px; margin: 14px 0 0; }
+.scrollrow input[type=range] { flex: 1; min-width: 0; accent-color: var(--accent); cursor: pointer; }
 /* line names at the ends of the lines */
 .ch-lab { font-size: 13px; font-weight: 500; fill: var(--ink); }
 .ch-labv { fill: var(--ink-2); font-weight: 600; }

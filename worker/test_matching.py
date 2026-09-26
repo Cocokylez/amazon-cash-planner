@@ -689,6 +689,19 @@ check("but one still being built is never asked for twice", _while.get("reused")
 _plain = _s.create("fees-preview", "2026-10-08", "2026-10-08", date_range="Custom date range")
 check("a request from the button is not marked as the schedule's", _plain.get("scheduled"), None)
 
+# Ask now, collect later: a report Amazon is building is waiting, not stopped.
+check("\"requested\" is a state a report can be in", "requested" in W.STATUSES, True)
+check("and it is not using the browser", "requested" in W.IN_BROWSER, False)
+_r = _s.create("fees-preview", "2026-10-09", "2026-10-09", date_range="Custom date range",
+               fresh=True, scheduled="day")
+_s.update(_r["jobId"], status="requested", ticket={"tag": "acp-9", "requestedAt": 1})
+_again = _s.create("fees-preview", "2026-10-09", "2026-10-09", date_range="Custom date range",
+                   fresh=True, scheduled="day")
+check("one being built is never asked for twice", _again.get("reused"), True)
+_rec = W.recover_interrupted(_s)
+check("a helper restart leaves it waiting to be collected",
+      (_s.get(_r["jobId"])["status"], _r["jobId"] in _rec["stopped"]), ("requested", False))
+
 
 section("Which of the six options a report actually contains")
 

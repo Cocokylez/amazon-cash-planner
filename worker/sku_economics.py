@@ -2849,8 +2849,14 @@ def download(
     date_to: str | None = None,
     ticket: dict | None = None,
     save_ticket=None,
+    request_only: bool = False,
 ) -> dict:
-    """Open the page, fill it in, generate, wait, download. Returns the file."""
+    """Open the page, fill it in, generate, wait, download. Returns the file.
+
+    request_only: stop once Amazon has the request - {'requested': True}. The
+    morning download asks for several reports back to back and collects them
+    afterwards (the ticket path below), so no one waits while Amazon builds
+    each in turn."""
     from playwright.sync_api import sync_playwright
 
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -2979,6 +2985,10 @@ def download(
                 })
 
             generate(page, progress)
+
+            if request_only:
+                progress("requested", "Asked Amazon for it; it is collected once Amazon has built it.")
+                return {"requested": True}
 
             row, link = wait_for_report(page, tag, date_range, progress,
                                          date_from=date_from, date_to=date_to,
