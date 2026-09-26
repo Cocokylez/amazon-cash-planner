@@ -222,4 +222,39 @@ T.section('Zoom, and every line named');
   T.eq('weekly zoom keeps whole weeks', itemsOf(wk).map(x => x.from).join(), '2026-10-05');
 }
 
+T.section('Each day from the newest download that covers it');
+{
+  /* A week, downloaded last Monday: $700 net sales, $10 FBA a day's worth each day. */
+  const week = file('10/05/2026', '10/11/2026', [['SKU-A', 70, '700.00', '0.00', '70.00', '0.00']], 'week.csv');
+  /* One day inside it, downloaded this morning: Amazon's own figure for the 7th. */
+  const day7 = file('10/07/2026', '10/07/2026', [['SKU-A', 25, '250.00', '0.00', '20.00', '0.00']], 'day7.csv');
+  const when = new Map([[week, '2026-09-21T06:10:00'], [day7, '2026-09-28T06:05:00']]);
+  const f = Simple.forecastFor([week, day7], '2026-10-05', '2026-10-11', { whenOf: x => when.get(x) });
+  T.eqMoney('the day has its own figure, the other six share the week', f.netSales, '850.00');   // 250 + 700 * 6/7
+  const d = f.daily.find(e => e.date === '2026-10-07');
+  T.eqMoney('the 7th is exactly the one-day report', d.netSales, '250.00');
+  T.eq('nothing is counted twice: the week gives up the 7th', f.files.find(x => x.name === 'week.csv').days, 6);
+  T.eq('and the week is not called exact any more', f.exact, false);
+
+  /* The same dates downloaded again the next day win, even if wider. */
+  const wide = file('10/05/2026', '10/11/2026', [['SKU-A', 70, '1400.00', '0.00', '0.00', '0.00']], 'wide-newer.csv');
+  const when2 = new Map([[day7, '2026-09-28T06:05:00'], [wide, '2026-09-29T09:00:00']]);
+  const g = Simple.forecastFor([day7, wide], '2026-10-07', '2026-10-07', { whenOf: x => when2.get(x) });
+  T.eqMoney('a later day\u2019s download wins, because the forecast moved', g.netSales, '200.00');   // 1400 / 7
+
+  /* The same morning: the narrow one-day report beats a manual eight-week file. */
+  const when3 = new Map([[day7, '2026-09-28T06:05:00'], [wide, '2026-09-28T09:00:00']]);
+  const h = Simple.forecastFor([day7, wide], '2026-10-07', '2026-10-07', { whenOf: x => when3.get(x) });
+  T.eqMoney('on the same day, the one-day report is used', h.netSales, '250.00');
+
+  const Preview2 = require('../lib/preview.js');
+  const o = Preview2.ownership([week, day7, wide], { whenOf: x => (x === wide ? '2026-09-29T01:00:00' : when.get(x)) });
+  T.eq('a download every day of which is newer elsewhere owns nothing', o.superseded.map(x => x.name).join(), 'week.csv,day7.csv');
+  T.eq('the rest own every day between them', [...o.owned.values()].reduce((n, d) => n + d.length, 0), 7);
+  const gbp = file('10/07/2026', '10/07/2026', [['SKU-A', 1, '1.00', '0.00', '0.00', '0.00']], 'other-store.csv');
+  gbp.store = 'UK';
+  const o2 = Preview2.ownership([day7, gbp]);
+  T.eq('another store never competes for the day', o2.superseded.length, 0);
+}
+
 process.exit(T.report() ? 0 : 1);

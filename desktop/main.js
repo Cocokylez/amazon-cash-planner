@@ -11,8 +11,9 @@
  */
 'use strict';
 
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Tray, Menu, nativeImage, powerSaveBlocker } = require('electron');
 const { spawn } = require('child_process');
+const os = require('os');
 const http = require('http');
 const path = require('path');
 
@@ -86,9 +87,60 @@ let statusWindow = null;
 let appWindow = null;
 let weStartedIt = false;
 
+/* ── running in the background ──────────────────────────────────────────
+
+   The daily download runs at 6 in the morning, so the app can start with
+   Windows - quietly, in the tray - and keep running when its window is
+   closed. Both are the person's choice (Settings), and a started-by-Windows
+   copy shows itself the moment anything needs them. */
+const HIDDEN = process.argv.includes('--hidden');
+let tray = null;
+let quitting = false;
+let keepAwake = null;
+
+/* One copy at a time. A second start - the shortcut, while the first runs in
+   the tray - brings the first one forward instead of starting another helper. */
+const primary = app.requestSingleInstanceLock();
+/* Windows shows notifications for an app it can name: the same id the
+   installer gives the shortcuts. Without it, "Amazon needs you" at 6 AM could
+   quietly never appear. */
+if (process.platform === 'win32') app.setAppUserModelId('com.local.amazon-cash-planner');
+if (!primary) app.quit();
+app.on('second-instance', () => showApp());
+app.on('before-quit', () => { quitting = true; });
+
+function startsWithWindows() {
+  try { return !!app.getLoginItemSettings({ args: ['--hidden'] }).openAtLogin; } catch (e) { return false; }
+}
+
+function showApp() {
+  const w = appWindow || statusWindow;
+  if (!w) { if (primary) boot(); return; }
+  if (w.isMinimized()) w.restore();
+  w.show();
+  w.focus();
+}
+
+function ensureTray() {
+  if (tray) return;
+  try {
+    const img = nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png'));
+    tray = new Tray(img.isEmpty() ? img : img.resize({ width: 16, height: 16 }));
+  } catch (e) { tray = null; return; }
+  tray.setToolTip('Amazon Cash Planner');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Open Amazon Cash Planner', click: showApp },
+    { label: 'Download today\u2019s forecast now',
+      click: () => { if (appWindow) appWindow.webContents.send('schedule:run'); } },
+    { type: 'separator' },
+    { label: 'Quit', click: () => { quitting = true; app.quit(); } },
+  ]));
+  tray.on('click', showApp);
+}
+
 function createStatusWindow() {
   statusWindow = new BrowserWindow({
-    width: 520, height: 320, resizable: false, show: true,
+    width: 520, height: 320, resizable: false, show: !HIDDEN,
     title: 'Amazon Cash Planner',
     webPreferences: {
       contextIsolation: true, nodeIntegration: false, sandbox: true,
@@ -123,6 +175,9 @@ function say(text, kind, action) {
   logLine(String(text));
   lastStatus = { text: String(text), kind: kind || 'working',
     action: action || null };
+  /* Started quietly by Windows, and now something needs the person. */
+  if (HIDDEN && kind && kind !== 'working' && statusWindow && !statusWindow.isDestroyed()
+      && !statusWindow.isVisible()) statusWindow.show();
   if (statusWindow && !statusWindow.isDestroyed()) {
     statusWindow.webContents.send('status', lastStatus);
   }
@@ -136,6 +191,10 @@ function openApp(url) {
       contextIsolation: true, nodeIntegration: false, sandbox: true,
       /* Three read-only facts, and nothing else. See app-preload.js. */
       preload: path.join(__dirname, 'app-preload.js'),
+      /* The morning download runs while this window is hidden in the tray.
+         Chromium otherwise slows a hidden page's timers to once a minute,
+         which would stretch a one-hour run into several. */
+      backgroundThrottling: false,
     },
   });
   appWindow.removeMenu();
@@ -157,10 +216,20 @@ function openApp(url) {
 
   appWindow.loadURL(url);
   appWindow.once('ready-to-show', () => {
-    appWindow.show();
+    if (!HIDDEN) appWindow.show();
     if (statusWindow && !statusWindow.isDestroyed()) statusWindow.close();
   });
+  /* Closing the window keeps the app in the tray while it is set to start
+     with Windows - that is what makes the morning download possible. Quit is
+     in the tray's menu. */
+  appWindow.on('close', e => {
+    if (!quitting && startsWithWindows()) {
+      e.preventDefault();
+      appWindow.hide();
+    }
+  });
   appWindow.on('closed', () => { appWindow = null; });
+  ensureTray();
 }
 
 /* ── shutting down ──────────────────────────────────────────────────────── */
@@ -528,8 +597,30 @@ function setUpdateState(state, detail) {
 }
 
 function shellInfo() {
-  return { appVersion: app.getVersion(), updates: Object.assign({}, updates) };
+  return { appVersion: app.getVersion(), updates: Object.assign({}, updates),
+    hostname: os.hostname(), startup: startsWithWindows() };
 }
+
+/* Start with Windows (in the tray), asked for by the page's Settings. */
+ipcMain.handle('shell:startup', (event, on) => {
+  if (typeof on === 'boolean') {
+    app.setLoginItemSettings({ openAtLogin: on, args: ['--hidden'] });
+    logLine('start with Windows: ' + (on ? 'on' : 'off'));
+  }
+  return startsWithWindows();
+});
+
+/* While the daily download runs, the computer is kept from sleeping - only
+   the app's own work, never the screen - and released the moment it ends. */
+ipcMain.handle('shell:busy', (event, on) => {
+  if (on && keepAwake === null) keepAwake = powerSaveBlocker.start('prevent-app-suspension');
+  if (!on && keepAwake !== null) { powerSaveBlocker.stop(keepAwake); keepAwake = null; }
+  if (tray) tray.setToolTip(on ? 'Amazon Cash Planner \u2014 downloading today\u2019s forecast'
+    : 'Amazon Cash Planner');
+  return !!on;
+});
+
+ipcMain.handle('shell:show', () => { showApp(); return true; });
 
 ipcMain.handle('shell:info', () => shellInfo());
 ipcMain.handle('shell:check-updates', async () => {
@@ -626,7 +717,7 @@ function checkForUpdates() {
   }
 }
 
-app.whenReady().then(boot);
+app.whenReady().then(() => { if (primary) boot(); });
 
 app.on('window-all-closed', async () => {
   const cfg = readConfig();

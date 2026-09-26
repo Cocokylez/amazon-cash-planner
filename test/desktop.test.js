@@ -807,7 +807,8 @@ const H = require('../desktop/helper.js');
     T.ok('the app opens on the forecast', /screen: 'sales', tab: null/.test(app));
     T.ok('the old screens are kept, just not in the navigation', /const HIDDEN_SCREENS = \[/.test(app)
       && /screens\.dashboard = function|screens\.dashboard=/.test(app));
-    T.ok('the forecast screen reads the new calculation', /Simple\.forecastFor\(scoped, from, to\)/.test(app));
+    T.ok('the forecast screen reads the new calculation, newest download first', /forecastOf\(scoped, from, to\)/.test(app)
+      && /const forecastOf = \(previews, from, to\) => Simple\.forecastFor\(previews, from, to, \{ whenOf: previewWhen\(\) \}\)/.test(app));
     T.ok('which the page loads', html.indexOf('<script src="lib/simple.js"></script>') > html.indexOf('lib/dataset.js')
       && html.indexOf('lib/simple.js') < html.indexOf('lib/app.js'));
     const dataScreen = app.slice(app.indexOf('screens.data = function'), app.indexOf('screens.data = function') + 6000);
@@ -844,9 +845,39 @@ const H = require('../desktop/helper.js');
       && /if \(!\(opts && opts\.quiet\)\) scheduleSyncPush\(\);/.test(app)
       && /Sync\.sameState\(merged, remote\.payload\)/.test(app));
     T.ok('the sidebar always says where the figures are', /row\('Supabase', cloud\[0\], cloud\[1\]\)/.test(app));
-    T.ok('and every screen says so while Supabase is not holding them', /updateBar\(\) \+ cloudBar\(\)/.test(app));
+    T.ok('and every screen says so while Supabase is not holding them', /updateBar\(\) \+ scheduleBar\(\) \+ cloudBar\(\)/.test(app));
     T.ok('setup finishes with the one-time table', /Step ' \+ step \+ ' of 3/.test(app) && /data-copysql/.test(app)
       && /data-cloudcheck/.test(app));
+  }
+
+  /* The morning download: careful, stoppable, and in the person's hands. */
+  {
+    const fs3 = require('fs'), p3 = (...a) => require('path').join(__dirname, '..', ...a);
+    const app = fs3.readFileSync(p3('lib', 'app.js'), 'utf8');
+    const main = fs3.readFileSync(p3('desktop', 'main.js'), 'utf8');
+    const run = app.slice(app.indexOf('async function runSchedule('), app.indexOf('function markScheduled('));
+    T.ok('one report at a time: each is waited for before the next is asked for',
+      /for \(let n = 0; n < windows\.length; n\+\+\)[\s\S]{0,400}await fetchWindow\(w\)/.test(run));
+    T.ok('with a pause between them', /await pause\(cfg\.gapSeconds \* 1000\)/.test(run));
+    T.ok('a sign-in, CAPTCHA or check stops it and tells the person',
+      /j\.status === 'login-required'[\s\S]{0,300}needsYou\(/.test(run));
+    T.ok('and nobody there: it waits for Continue rather than trying the rest', /await waitForContinue\(\)/.test(run));
+    T.ok('three failures in a row stop it', /\+\+inARow >= 3/.test(run));
+    T.ok('it never asks for more than the daily cap', /maxPerDay/.test(fs3.readFileSync(p3('lib', 'schedule.js'), 'utf8')));
+    T.ok('it asks Amazon for a fresh report, marked as the schedule\u2019s', /fresh: true, scheduled: w\.kind/.test(run));
+    T.ok('a replaced download is recorded, so it is never imported back over the newer one',
+      /Recorded as let go[\s\S]{0,700}Sync\.removal\(replaced, at\)/.test(app) && /!letGo\.has\(j\.jobId\)/.test(app));
+    T.ok('only files the schedule downloaded are let go', /if \(i\.family !== 'Fees & Economics Preview' \|\| !i\.schedule\) continue;/.test(app));
+    T.ok('test shortcuts never apply in the installed app', /if \(window\.desktopShell \|\| !\/\^\(localhost/.test(app));
+    T.ok('only one copy of the app runs', /requestSingleInstanceLock\(\)/.test(main));
+    T.ok('it can start with Windows, quietly', /setLoginItemSettings\(\{ openAtLogin: on, args: \['--hidden'\] \}\)/.test(main)
+      && /show: !HIDDEN/.test(main) && /if \(!HIDDEN\) appWindow\.show\(\)/.test(main));
+    T.ok('closing the window keeps it in the tray only while it starts with Windows',
+      /if \(!quitting && startsWithWindows\(\)\) \{\s*e\.preventDefault\(\);\s*appWindow\.hide\(\);/.test(main));
+    T.ok('the computer stays awake only while a run is going', /powerSaveBlocker\.start\('prevent-app-suspension'\)/.test(main)
+      && /powerSaveBlocker\.stop\(keepAwake\)/.test(main));
+    T.ok('a started-by-Windows copy shows itself when something needs the person',
+      /if \(HIDDEN && kind && kind !== 'working'/.test(main));
   }
 
   /* The guide: whole on a first install, what changed after an update. */

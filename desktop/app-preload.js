@@ -33,6 +33,16 @@ contextBridge.exposeInMainWorld('desktopShell', {
     });
   },
 
+  /* The morning download. Start with Windows (true/false, or nothing to
+     just ask), keep the computer awake while it runs, bring the window
+     forward, and hear the tray's "Download now". */
+  startup: on => ipcRenderer.invoke('shell:startup', typeof on === 'boolean' ? on : undefined),
+  busy: on => ipcRenderer.invoke('shell:busy', !!on),
+  show: () => ipcRenderer.invoke('shell:show'),
+  onScheduleRun(handler) {
+    ipcRenderer.on('schedule:run', () => { if (typeof handler === 'function') handler(); });
+  },
+
   /* Ask Claude. Every result is copied out as plain data. */
   claude: {
     status: () => ipcRenderer.invoke('claude:status'),

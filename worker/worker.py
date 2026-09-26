@@ -83,7 +83,7 @@ DATASET_PATH = DATA / "dataset.json"
 # compares this against what it expects and says plainly when they differ,
 # because "it is running but it is the old code" was the hardest failure to
 # see from the outside.
-HELPER_VERSION = "5.3.0"
+HELPER_VERSION = "5.4.0"
 
 HOST = "127.0.0.1"          # loopback only: never exposed to the network
 PORT = int(os.environ.get("FBA_WORKER_PORT") or 0) or None  # resolved after config
@@ -336,21 +336,37 @@ class JobStore:
     def create(self, report_type: str, date_from: str, date_to: str,
                marketplace: str | None = None,
                account_type: str | None = None,
-               date_range: str | None = None) -> dict:
+               date_range: str | None = None,
+               fresh: bool = False,
+               scheduled: str | None = None) -> dict:
+        # fresh: the daily schedule asks for the same dates every morning, and
+        # Amazon's forecast moves. A report requested on an EARLIER day is out
+        # of date, so it is not collected again - only one from today, or one
+        # still being built, counts as already asked for.
+        today = datetime.now().astimezone().date()
+
+        def same_day(stamp) -> bool:
+            try:
+                return datetime.fromisoformat(stamp).astimezone().date() == today
+            except Exception:
+                return False
+
         with self._lock:
             # Never request a report that is already pending. Marketplace and
             # account type are part of the identity: the same dates for two
             # countries are two different reports.
             for jid in reversed(self._order):
                 j = self._jobs[jid]
+                live = j["status"] not in ("complete", "failed", "cancelled")
+                if fresh and not live and not same_day(j.get("queuedAt")):
+                    continue
                 if (j["reportType"] == report_type
                         and j["requestedFrom"] == date_from
                         and j["requestedTo"] == date_to
                         and j.get("marketplace") == marketplace
                         and j.get("accountType") == account_type
                         and j.get("dateRange") == date_range
-                        and (j["status"] not in ("complete", "failed", "cancelled")
-                             or j.get('ticket'))):
+                        and (live or j.get('ticket'))):
                     # Two very different situations, and reporting them the
                     # same way told the seller "already running" while nothing
                     # was running at all - no browser, no progress, no way
@@ -382,6 +398,9 @@ class JobStore:
                 "fileName": None,
                 "rowCount": None,
                 "reused": False,
+                # "day" or "week" when the daily schedule asked for it; the app
+                # lets those go once newer ones replace them.
+                "scheduled": scheduled if scheduled in ("day", "week") else None,
             }
             self._jobs[job["jobId"]] = job
             self._order.append(job["jobId"])
@@ -1285,6 +1304,9 @@ class Handler(BaseHTTPRequestHandler):
             # ignored rather than sent to Amazon.
             fc_win = iso_pair(payload.get("forecast"))
             hist_win = iso_pair(payload.get("history"))
+            # The daily schedule: always a fresh report, and marked as its own.
+            fresh = bool(payload.get("fresh"))
+            scheduled = payload.get("scheduled")
 
             created, skipped, blocked = [], [], []
             # The reports this press asked for. The app sends only the
@@ -1330,7 +1352,7 @@ class Handler(BaseHTTPRequestHandler):
                     job = JOBS.create(
                         rt, dfrom, dto, marketplace=mkt,
                         account_type=acct if spec.get("needsAccountType") else None,
-                        date_range=drange)
+                        date_range=drange, fresh=fresh, scheduled=scheduled)
                     if job.get("resumable"):
                         # A report that was already asked for. Collect it.
                         JOBS.update(job["jobId"], status="queued",

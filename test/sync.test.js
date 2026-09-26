@@ -428,5 +428,25 @@ T.section('Blob keys are legal path segments');
     T.eq('and the rest of it whole', sent.imports.map(i => i.id).join(), 'i1,i2');
   }
 
+  T.section('A file removed on one computer stays removed on the others');
+  {
+    const S = require('../lib/sync.js');
+    const sync = S.create({ use: async () => null });
+    const old = { id: 'a', contentHash: 'H1', importedAt: '2026-09-20T06:00:00Z' };
+    const keep = { id: 'b', contentHash: 'H2', importedAt: '2026-09-21T06:00:00Z' };
+    const removed = [S.removal(old, '2026-09-22T06:00:00Z')];
+    /* This computer still has the old file; the project says it was removed. */
+    const m = sync.mergeState({ imports: [old, keep], removedImports: [] }, { imports: [keep], removedImports: removed }, false);
+    T.eq('the other computer\u2019s copy does not bring it back', m.imports.map(i => i.id).join(), 'b');
+    T.eq('and the removal is kept, for the next computer', m.removedImports.length, 1);
+    /* The same file downloaded again later is new, not the removed copy. */
+    const again = Object.assign({}, old, { fetchedAt: '2026-09-25T06:00:00Z' });
+    const n = sync.mergeState({ imports: [again, keep], removedImports: removed }, { imports: [keep], removedImports: removed }, false);
+    T.ok('the same file downloaded again afterwards is kept', n.imports.some(i => i.id === 'a'));
+    T.eq('old removal records are let go after 90 days',
+      S.trimRemovals([S.removal(old, '2026-01-01T00:00:00Z'), S.removal(keep, '2026-09-01T00:00:00Z')], '2026-09-26T00:00:00Z').length, 1);
+    T.ok('and the schedule\u2019s settings travel with the figures', S.STATE_KEYS.indexOf('schedule') >= 0);
+  }
+
   process.exit(T.report() ? 0 : 1);
 })();

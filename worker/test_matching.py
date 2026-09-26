@@ -668,6 +668,27 @@ _fresh = _s.create("fees-preview", "2026-01-01", "2026-01-31",
 check("a failure with no ticket does not block a new request",
       _fresh.get("reused"), False)
 
+# The daily schedule asks for the same dates every morning. Yesterday's report
+# is out of date: it must be asked for again, not collected again.
+_c = _s.create("fees-preview", "2026-10-07", "2026-10-07", date_range="Custom date range",
+               fresh=True, scheduled="day")
+check("a scheduled request is marked as the schedule's", _c.get("scheduled"), "day")
+_s.update(_c["jobId"], status="complete", ticket={"tag": "acp-2"})
+_same_day = _s.create("fees-preview", "2026-10-07", "2026-10-07", date_range="Custom date range",
+                      fresh=True, scheduled="day")
+check("the same morning, the report already fetched is not asked for twice",
+      _same_day.get("reused"), True)
+_s.update(_c["jobId"], queuedAt="2020-01-01T06:00:00+00:00")
+_next_day = _s.create("fees-preview", "2026-10-07", "2026-10-07", date_range="Custom date range",
+                      fresh=True, scheduled="day")
+check("the next morning the same dates are a new request", _next_day.get("reused"), False)
+_s.update(_next_day["jobId"], status="requesting")
+_while = _s.create("fees-preview", "2026-10-07", "2026-10-07", date_range="Custom date range",
+                   fresh=True, scheduled="day")
+check("but one still being built is never asked for twice", _while.get("reused"), True)
+_plain = _s.create("fees-preview", "2026-10-08", "2026-10-08", date_range="Custom date range")
+check("a request from the button is not marked as the schedule's", _plain.get("scheduled"), None)
+
 
 section("Which of the six options a report actually contains")
 
