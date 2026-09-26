@@ -830,6 +830,25 @@ const H = require('../desktop/helper.js');
     T.ok('the sidebar says what forecast is loaded, not a feature count', /\$\('#sidenote'\)\.innerHTML = forecastStatus\(\);/.test(app));
   }
 
+  /* Supabase is where the figures are kept. */
+  {
+    const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'app.js'), 'utf8');
+    const push = app.slice(app.indexOf('async function syncPush('), app.indexOf('/* Resolving a conflict'));
+    T.ok('files go up before the list that names them', push.indexOf('putBlob(') > 0
+      && push.indexOf('putBlob(') < push.indexOf('pushState('));
+    T.ok('"saved" is said only after asking the project', push.indexOf('pullState()') > push.indexOf('pushState(')
+      && push.indexOf("setStatus('saved'") > push.indexOf('readManifest()', push.indexOf('pushState(')));
+    T.ok('every computer checks the project every minute', /setInterval\(syncPull, 60000\)/.test(app));
+    T.ok('and when its window comes back into view', /visibilitychange[\s\S]{0,80}pullIfStale/.test(app));
+    T.ok('taking the project\u2019s copy is not sent straight back', /persist\(\{ quiet: true \}\)/.test(app)
+      && /if \(!\(opts && opts\.quiet\)\) scheduleSyncPush\(\);/.test(app)
+      && /Sync\.sameState\(merged, remote\.payload\)/.test(app));
+    T.ok('the sidebar always says where the figures are', /row\('Supabase', cloud\[0\], cloud\[1\]\)/.test(app));
+    T.ok('and every screen says so while Supabase is not holding them', /updateBar\(\) \+ cloudBar\(\)/.test(app));
+    T.ok('setup finishes with the one-time table', /Step ' \+ step \+ ' of 3/.test(app) && /data-copysql/.test(app)
+      && /data-cloudcheck/.test(app));
+  }
+
   /* The guide: whole on a first install, what changed after an update. */
   {
     const app = require('fs').readFileSync(require('path').join(__dirname, '..', 'lib', 'app.js'), 'utf8');

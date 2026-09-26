@@ -321,8 +321,13 @@ tbody tr:hover td.act { background: var(--surface-alt); }
   padding: 10px var(--pad-x); background: var(--ok-bg);
   border-bottom: 1px solid var(--accent-line); color: var(--accent);
   font-size: var(--t-label); }
-.updbar.is-working { background: var(--warn-bg); border-bottom-color: var(--warn-line);
+.updbar.is-working, .updbar.is-warn { background: var(--warn-bg); border-bottom-color: var(--warn-line);
   color: var(--warn); }
+.updbar.is-warn b { color: var(--ink); }
+/* the one-time Supabase setup, shown whole so it can be checked before running */
+.sqlbox { white-space: pre-wrap; font-size: 12px; line-height: 1.45; background: var(--surface-alt);
+  padding: 12px; border-radius: 8px; border: 1px solid var(--line); overflow: auto; max-height: 220px;
+  margin: 0; user-select: text; }
 .updbar b { font-weight: 600; }
 .updbar .grow { flex: 1 1 auto; }
 .updbar .btn { margin: 0; }
@@ -775,8 +780,8 @@ details[open] > summary { margin-bottom: 10px; }
       <span>Cash Planner</span>
     </div>
     <nav id="sidenav" aria-label="Sections"></nav>
-    <button type="button" class="datastatus" id="sidenote" data-go="data"
-            aria-label="Data status - open Data and Assumptions"></button>
+    <button type="button" class="datastatus" id="sidenote" data-go="data" data-then="syncpanel"
+            aria-label="Forecast and Supabase status - open Downloads"></button>
     <button id="askbtn" type="button" aria-haspopup="dialog" aria-controls="ask"
             aria-keyshortcuts="Control+J">
       <svg class="star" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor" stroke="none">

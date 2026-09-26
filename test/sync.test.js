@@ -397,5 +397,36 @@ T.section('Blob keys are legal path segments');
     T.eq('a busy project keeps the helper’s code, so it is retried once and reported', code, 'unavailable');
   }
 
+  T.section('Supabase as the database: what goes up, and when two copies are the same');
+  {
+    const S = require('../lib/sync.js');
+    const a = { imports: [{ id: 'i1', contentHash: 'h1', remoteOnly: true }, { id: 'i2', contentHash: 'h2' }],
+      productCosts: [{ id: 'c1', cost: 1 }], openingBankCash: null };
+    const b = { imports: [{ id: 'i2', contentHash: 'h2' }, { id: 'i1', contentHash: 'h1' }],
+      productCosts: [{ id: 'c1', cost: 1 }] };
+    T.ok('the same things in another order are the same', S.sameState(a, b));
+    T.ok('a new entry is a difference', !S.sameState(a, Object.assign({}, b,
+      { productCosts: [{ id: 'c1', cost: 1 }, { id: 'c2', cost: 2 }] })));
+    T.ok('a changed value is a difference', !S.sameState(a, Object.assign({}, b, { productCosts: [{ id: 'c1', cost: 9 }] })));
+    T.ok('money kept exact is compared exactly', S.sameState({ openingBankCash: 10n }, { openingBankCash: 10n })
+      && !S.sameState({ openingBankCash: 10n }, { openingBankCash: 11n }));
+    const out = S.withoutLocal(a.imports);
+    T.ok('"this computer has not got the file yet" never leaves this computer', out.every(i => !('remoteOnly' in i)));
+    T.ok('and stays in this computer\u2019s own copy', a.imports[0].remoteOnly === true);
+
+    const docs = new Map();
+    const ref = p => ({
+      async get() { return { exists: docs.has(p), data: () => docs.get(p) }; },
+      async set(o) { docs.set(p, o); }, async delete() { docs.delete(p); },
+      collection: sub => ({ doc: id => ref(p + '/' + sub + '/' + id) }),
+    });
+    const sync = S.create({ use: async what => (what === 'db' ? { doc: ref } : what === 'user' ? { id: async () => 'owner' } : null) });
+    await sync.connect();
+    await sync.pushState(a);
+    const sent = S.decode(docs.get('data/users/owner/state').payload);
+    T.ok('what reaches the project carries no "not got it yet" mark', sent.imports.every(i => !('remoteOnly' in i)));
+    T.eq('and the rest of it whole', sent.imports.map(i => i.id).join(), 'i1,i2');
+  }
+
   process.exit(T.report() ? 0 : 1);
 })();
